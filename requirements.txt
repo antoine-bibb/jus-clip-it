@@ -1,12 +1,6 @@
 fastapi
-uvicorn[standard]
+uvicorn
 python-dotenv
 stripe
-opencv-python
-numpy
-whisper
-.env
-.venv/
-__pycache__/
-app/data/
-python-dotenv
+jinja2
+python-multipart
