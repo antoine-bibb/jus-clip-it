@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+stripe
+opencv-python
+numpy
+whisper
+.env
+.venv/
+__pycache__/
+app/data/
+python-dotenv

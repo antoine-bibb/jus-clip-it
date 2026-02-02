@@ -1,0 +1,322 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Jus Clip It (Clean)</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="shortcut icon" href="/static/favicon.png">
+</head>
+<body>
+
+<header class="navbar">
+  <div class="nav-inner">
+    <div class="nav-left">
+      <span class="app-title">Jus Clip It</span>
+    </div>
+
+    <div class="nav-center">
+      <img src="/static/logo.png" alt="logo" class="nav-logo" />
+    </div>
+
+    <div class="nav-right">
+      <div class="credits">
+        <span class="coin">🪙</span>
+        <span id="creditBalance">0</span>
+      </div>
+      <button id="authBtn" class="nav-btn">Login / Create</button>
+    </div>
+  </div>
+</header>
+
+
+<div class="wrap">
+  <div class="left">
+    <h1>Jus Clip It</h1>
+
+    <label>Video (.mp4)</label>
+    <input id="video" type="file" accept="video/mp4" />
+
+    <div class="row">
+      <div>
+        <label>Clip length (sec)</label>
+        <select id="clipLen">
+          <option value="10">10s</option>
+          <option value="15">15s</option>
+          <option value="25" selected>25s</option>
+          <option value="30">30s</option>
+          <option value="45">45s</option>
+          <option value="60">60s</option>
+        </select>
+      </div>
+      <div>
+        <label>Max clips</label>
+        <select id="maxClips">
+          <option value="3">3</option>
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="10">10</option>
+          <option value="12">12</option>
+          <option value="15">15</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+  <h2>Crop & Format</h2>
+
+  <label>Output format</label>
+  <select id="outAspect">
+    <option value="9:16" selected>9:16 (Shorts/Reels)</option>
+    <option value="1:1">1:1 (Square)</option>
+    <option value="16:9">16:9 (Original)</option>
+  </select>
+
+  <label>Resolution</label>
+  <select id="outRes"></select>
+
+  <label>Crop mode</label>
+  <select id="cropMode">
+    <option value="center" selected>Center</option>
+    <option value="left">Left</option>
+    <option value="right">Right</option>
+    <option value="manual">Manual</option>
+    <option value="speaker">Speaker Follow</option>
+    <option value="smart">Smart Follow</option>
+    <option value="none">No Crop</option>
+  </select>
+
+  <div id="manualCropBox" style="display:none;">
+    <div class="row">
+      <div>
+        <label>Crop X (%)</label>
+        <input id="cropX" type="number" value="50" min="0" max="100" />
+      </div>
+      <div>
+        <label>Crop Y (%)</label>
+        <input id="cropY" type="number" value="50" min="0" max="100" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Crop Width (%)</label>
+        <input id="cropW" type="number" value="56" min="10" max="100" />
+      </div>
+      <div>
+        <label>Crop Height (%)</label>
+        <input id="cropH" type="number" value="100" min="10" max="100" />
+      </div>
+    </div>
+  </div>
+</div>
+
+
+    <button id="go">Generate</button>
+
+    <div class="status" id="status">Idle.</div>
+
+    <div class="clips" id="clips"></div>
+  </div>
+
+  <div class="right">
+    <div class="player">
+      <video id="pv" controls></video>
+      <div id="cap" class="cap"></div>
+    </div>
+
+    <div class="controls">
+      <div class="row">
+        <div>
+          <label>Font size</label>
+          <input id="fontSize" type="number" value="35" min="18" max="120" />
+        </div>
+         <div class="row">
+        <div>
+          <label>Outline size</label>
+          <input id="strokeWidth" type="number" value="2" min="0" max="24" />
+        </div>
+        <div>
+          <label>Words on screen</label>
+          <input id="wordWindow" type="number" value="3" min="1" max="5" />
+        </div>
+      </div>
+
+      <label>Text color</label>
+      <div class="palette" id="textPalette"></div>
+      <input id="color" type="color" value="#ffffff" style="display:none;" />
+
+      <label>Highlight color</label>
+      <div class="palette" id="hiPalette"></div>
+      <input id="hi" type="color" value="#ff2a2a" style="display:none;" />
+
+      <label>Outline color</label>
+      <div class="palette" id="strokePalette"></div>
+      <input id="stroke" type="color" value="#000000" style="display:none;" />
+
+     
+        <div>
+          <label> </label>
+          <div style="opacity:.7;font-size:12px;">Click a swatch to change colors.</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Pos X (%)</label>
+          <input id="posX" type="number" value="50" min="0" max="100" />
+        </div>
+        <div>
+          <label>Pos Y (%)</label>
+          <input id="posY" type="number" value="78" min="0" max="100" />
+        </div>
+      </div>
+
+      <div class="row">
+        <a id="dlSrt" class="link" href="#" target="_blank">Download SRT</a>
+        <a id="dlJson" class="link" href="#" target="_blank">Download Words JSON</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="srtModal" class="modal" style="display:none;">
+  <div class="modalInner">
+    <div class="modalTop">
+      <div style="font-weight:900;">Edit Captions (SRT)</div>
+      <button id="closeSrt" class="smallBtn" type="button">Close</button>
+    </div>
+    <textarea id="srtBox" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button id="saveSrt" type="button">Save</button>
+      <button id="cancelSrt" type="button" style="background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.18);">Cancel</button>
+    </div>
+    <div class="status" id="srtStatus" style="min-height:18px;"></div>
+  </div>
+</div>
+<!-- AUTH MODAL -->
+<div id="authModal" class="modalOverlay" style="display:none;">
+  <div class="modalCard">
+    <div class="modalHeader">
+      <div class="modalTitle" id="authTitle">Login</div>
+      <button class="modalX" id="authCloseBtn">✕</button>
+    </div>
+
+    <div class="modalTabs">
+      <button id="tabLogin" class="tab active">Login</button>
+      <button id="tabSignup" class="tab">Create Account</button>
+    </div>
+
+    <div id="authError" class="authError" style="display:none;"></div>
+
+    <!-- LOGIN FORM -->
+    <form id="loginForm" class="authForm">
+      <label class="field">
+        <div class="label">Username</div>
+        <input id="loginUsername" type="text" autocomplete="username" required />
+      </label>
+
+      <label class="field">
+        <div class="label">Password</div>
+        <input id="loginPassword" type="password" autocomplete="current-password" required />
+      </label>
+
+      <button type="submit" class="primaryBtn">Login</button>
+    </form>
+
+    <!-- SIGNUP FORM -->
+    <form id="signupForm" class="authForm" style="display:none;">
+      <label class="field">
+        <div class="label">Email</div>
+        <input id="signupEmail" type="email" autocomplete="email" required />
+      </label>
+
+      <label class="field">
+        <div class="label">Username</div>
+        <input id="signupUsername" type="text" autocomplete="username" required />
+      </label>
+
+      <label class="field">
+        <div class="label">Password</div>
+        <input id="signupPassword" type="password" autocomplete="new-password" required />
+      </label>
+
+      <div class="hint">Free accounts start with <b>10 credits</b>. Subscriptions reset monthly.</div>
+
+
+      <button type="submit" class="primaryBtn">Create Account</button>
+    </form>
+
+   <div class="modalFooter">
+  <button id="logoutBtn" class="ghostBtn" style="display:none;">Logout</button>
+  <button id="buyCreditsBtn" class="ghostBtn" style="display:none;">Manage Plan</button>
+  <button id="addCreditsBtn" class="ghostBtn" style="display:none;">Add Credits</button>
+</div>
+
+  </div>
+</div>
+<!-- BILLING / PLAN MODAL -->
+<div id="billingModal" class="modalOverlay" style="display:none;">
+  <div class="modalCard" style="max-width:560px;">
+    <div class="modalHeader">
+      <div class="modalTitle">Choose Your Plan</div>
+      <button class="modalX" id="billingCloseBtn">✕</button>
+    </div>
+
+    <div id="billingStatus" class="status" style="min-height:18px;"></div>
+
+    <div style="display:flex; gap:10px; margin:10px 0 14px;">
+      <button id="billMonthlyBtn" class="tab active" type="button">Monthly</button>
+      <button id="billRecurringBtn" class="tab" type="button">Recurring (Discount)</button>
+    </div>
+
+    <div id="planGrid" style="display:grid; gap:10px;"></div>
+
+    <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div style="opacity:.75; font-size:12px;">
+        Credits reset every 30 days to your plan amount.
+      </div>
+      <button id="planSaveBtn" class="primaryBtn" type="button" disabled>Save Plan</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD CREDITS MODAL -->
+<div id="creditsModal" class="modalOverlay" style="display:none;">
+  <div class="modalCard" style="max-width:460px;">
+    <div class="modalHeader">
+      <div class="modalTitle">Add Credits</div>
+      <button class="modalX" id="creditsCloseBtn">✕</button>
+    </div>
+
+    <div id="creditsStatus" class="status" style="min-height:18px;"></div>
+
+    <label class="field" style="margin-top:10px;">
+      <div class="label">Credits to add</div>
+      <input id="creditsAmount" type="number" min="1" step="1" value="10" />
+    </label>
+
+    <div style="display:flex; gap:10px; margin-top:12px;">
+      <button id="creditsConfirmBtn" class="primaryBtn" type="button">Add</button>
+      <button id="creditsCancelBtn" class="ghostBtn" type="button">Cancel</button>
+    </div>
+
+    <div style="opacity:.65; font-size:12px; margin-top:10px;">
+      Note: This requires your backend endpoint <code>/api/credits/add</code>.
+      If you’re not using top-ups, you can hide this button.
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span>Jus Clip It</span>
+    <span class="muted">Local build • Caption preview system</span>
+  </div>
+</footer>
+
+</body>
+</html>
