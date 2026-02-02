@@ -72,14 +72,231 @@ const signupPassword = el("signupPassword");
 const logoutBtn = el("logoutBtn");
 const buyCreditsBtn = el("buyCreditsBtn"); // "Manage Plan"
 
-/* Billing modal */
+// ===============================
+// BILLING MODAL (Monthly/Recurring)
+// ===============================
 const billingModal = el("billingModal");
 const billingCloseBtn = el("billingCloseBtn");
 const billingStatus = el("billingStatus");
-const billMonthlyBtn = el("billMonthlyBtn");
-const billRecurringBtn = el("billRecurringBtn");
 const planGrid = el("planGrid");
 const planSaveBtn = el("planSaveBtn");
+
+const billMonthlyBtn = el("billMonthlyBtn");
+const billRecurringBtn = el("billRecurringBtn");
+
+let BILLING_MODE = "monthly"; // "monthly" | "recurring"
+let PLANS_CACHE = [];
+let selectedPlanKey = null;
+
+// Safe getters so we never display "undefined"
+function getCredits(plan) {
+  return (
+    plan.monthly_credits ??
+    plan.monthlyCredits ??
+    plan.credits_per_month ??
+    plan.creditsPerMonth ??
+    plan.credits ??
+    0
+  );
+}
+
+function getMonthlyPrice(plan) {
+  return (
+    plan.price_monthly ??
+    plan.priceMonthly ??
+    plan.monthly_price ??
+    plan.monthlyPrice ??
+    0
+  );
+}
+
+function getRecurringPrice(plan) {
+  // Try explicit recurring fields first
+  const direct =
+    plan.recurring_price_monthly ??
+    plan.recurringPriceMonthly ??
+    plan.recurring_monthly_price ??
+    plan.recurringMonthlyPrice ??
+    plan.discounted_price_monthly ??
+    plan.discountedPriceMonthly ??
+    (plan.recurring && (plan.recurring.price_monthly ?? plan.recurring.priceMonthly));
+
+  if (direct != null && direct !== "") return Number(direct) || 0;
+
+  // Fallback: compute discount if not provided
+  const monthly = Number(getMonthlyPrice(plan)) || 0;
+  const pct = Number(plan.discount_pct ?? plan.discountPct ?? (plan.recurring && (plan.recurring.discount_pct ?? plan.recurring.discountPct)) ?? 0) || 0;
+  const discounted = monthly * (1 - pct / 100);
+  return Math.round(discounted * 100) / 100;
+}
+
+function getStripePriceId(plan) {
+  return (
+    plan.price_id ??
+    plan.priceId ??
+    plan.stripe_price_id ??
+    plan.stripePriceId ??
+    ""
+  );
+}
+
+function money(v) {
+  const n = Number(v) || 0;
+  if (n <= 0) return "Free";
+  return `$${n.toFixed(0)}/mo`;
+}
+
+function setBillingStatus(msg, kind = "") {
+  billingStatus.textContent = msg || "";
+  billingStatus.className = "status" + (kind ? ` ${kind}` : "");
+}
+
+function setBillingTab(mode) {
+  BILLING_MODE = mode;
+  billMonthlyBtn.classList.toggle("active", mode === "monthly");
+  billRecurringBtn.classList.toggle("active", mode === "recurring");
+  renderPlanGrid();
+}
+
+async function openBillingModal() {
+  billingModal.style.display = "flex";
+  planSaveBtn.disabled = true;
+  selectedPlanKey = null;
+  setBillingStatus("Loading plans...");
+
+  try {
+    const res = await fetch("/api/billing/plans", { credentials: "include" });
+    if (!res.ok) throw new Error(`Failed to load plans (${res.status})`);
+    const data = await res.json();
+
+    // Expect { plans: [...] }
+    PLANS_CACHE = Array.isArray(data.plans) ? data.plans : [];
+    if (!PLANS_CACHE.length) {
+      setBillingStatus("No plans returned from /api/billing/plans", "error");
+      planGrid.innerHTML = "";
+      return;
+    }
+
+    setBillingStatus("");
+    renderPlanGrid();
+  } catch (err) {
+    console.error(err);
+    setBillingStatus(err.message || "Failed to load plans", "error");
+  }
+}
+
+function closeBillingModal() {
+  billingModal.style.display = "none";
+}
+
+function renderPlanGrid() {
+  if (!Array.isArray(PLANS_CACHE)) return;
+
+  planGrid.innerHTML = "";
+
+  const discountPctGlobal = 10; // label only; display doesn't require it
+
+  PLANS_CACHE.forEach((plan, idx) => {
+    const key = plan.key ?? plan.id ?? plan.tier ?? String(idx);
+    const name = plan.name ?? (key[0].toUpperCase() + key.slice(1));
+    const credits = getCredits(plan);
+
+    const monthlyPrice = getMonthlyPrice(plan);
+    const recurringPrice = getRecurringPrice(plan);
+
+    const shownPrice = BILLING_MODE === "monthly" ? monthlyPrice : recurringPrice;
+
+    const isSelected = selectedPlanKey === key;
+
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "planCard" + (isSelected ? " selected" : "");
+    card.style.cssText = `
+      text-align:left;
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      padding:14px;
+      cursor:pointer;
+    `;
+
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+        <div style="font-weight:700; font-size:14px;">${name}</div>
+        <div style="font-weight:800;">${money(shownPrice)}</div>
+      </div>
+
+      <div style="margin-top:6px; opacity:.9;">
+        <div style="font-size:13px;">
+          <b>${credits}</b> credits / month • ${BILLING_MODE === "monthly" ? "Standard billing" : `Discounted`}
+        </div>
+        <div style="font-size:12px; opacity:.75; margin-top:4px;">
+          1 credit = 1 job. Credits reset monthly to your tier amount.
+        </div>
+      </div>
+    `;
+
+    card.addEventListener("click", () => {
+      selectedPlanKey = key;
+      planSaveBtn.disabled = false;
+      renderPlanGrid();
+    });
+
+    planGrid.appendChild(card);
+  });
+}
+
+// Click handlers for tabs
+billMonthlyBtn?.addEventListener("click", () => setBillingTab("monthly"));
+billRecurringBtn?.addEventListener("click", () => setBillingTab("recurring"));
+
+// Close button
+billingCloseBtn?.addEventListener("click", closeBillingModal);
+
+// Save plan: if you’re using Stripe checkout
+planSaveBtn?.addEventListener("click", async () => {
+  if (!selectedPlanKey) return;
+
+  const plan = PLANS_CACHE.find(p => (p.key ?? p.id ?? p.tier) === selectedPlanKey);
+  if (!plan) return;
+
+  // Free plan shortcut (no Stripe)
+  const monthlyPrice = Number(getMonthlyPrice(plan)) || 0;
+  if (monthlyPrice <= 0) {
+    setBillingStatus("Free plan selected. (If you want, we can add a /api/billing/set-free endpoint.)", "");
+    closeBillingModal();
+    return;
+  }
+
+  const priceId = getStripePriceId(plan);
+  if (!priceId) {
+    setBillingStatus("This plan is missing a Stripe Price ID in /api/billing/plans.", "error");
+    return;
+  }
+
+  setBillingStatus("Redirecting to Stripe Checkout...");
+
+  try {
+    const res = await fetch("/api/stripe/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ price_id: priceId }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Checkout failed (${res.status})`);
+
+    if (!data.url) throw new Error("Stripe session URL missing");
+    window.location.href = data.url;
+  } catch (err) {
+    console.error(err);
+    setBillingStatus(err.message || "Checkout failed", "error");
+  }
+});
+
+// Expose openBillingModal if your UI triggers it elsewhere
+window.openBillingModal = openBillingModal();
 
 /* ----------------------------
    State

@@ -81,6 +81,86 @@ TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+@app.get("/api/billing/plans")
+def billing_plans():
+    """
+    Returns plan data in multiple key styles so the frontend never shows undefined.
+    """
+
+    RECURRING_DISCOUNT_PCT = 10  # change if you want
+
+    ordered = ["free", "basic", "plus", "pro"]
+    plans_out = []
+
+    for key in ordered:
+        p = PLANS.get(key)
+        if not p:
+            continue
+
+        credits = int(p.get("monthly_credits", 0))
+        monthly_price = float(p.get("price_monthly", 0))
+
+        # Recurring = discounted monthly equivalent (you can treat this as "annual paid monthly" etc.)
+        recurring_price = round(monthly_price * (1 - (RECURRING_DISCOUNT_PCT / 100.0)), 2)
+
+        stripe_price_id = ""
+        if key == "basic":
+            stripe_price_id = os.getenv("STRIPE_PRICE_BASIC", "").strip()
+        elif key == "plus":
+            stripe_price_id = os.getenv("STRIPE_PRICE_PLUS", "").strip()
+        elif key == "pro":
+            stripe_price_id = os.getenv("STRIPE_PRICE_PRO", "").strip()
+
+        # Build one plan object with LOTS of aliases
+        plan_obj = {
+            "key": key,
+            "id": key,                 # alias
+            "tier": key,               # alias
+            "name": key.capitalize(),
+
+            # Credits (aliases)
+            "monthly_credits": credits,
+            "monthlyCredits": credits,
+            "credits": credits,
+            "credits_per_month": credits,
+            "creditsPerMonth": credits,
+
+            # Monthly pricing (aliases)
+            "price_monthly": monthly_price,
+            "priceMonthly": monthly_price,
+            "monthly_price": monthly_price,
+            "monthlyPrice": monthly_price,
+
+            # Recurring pricing (aliases)
+            "recurring_price_monthly": recurring_price,
+            "recurringPriceMonthly": recurring_price,
+            "recurring_monthly_price": recurring_price,
+            "recurringMonthlyPrice": recurring_price,
+            "discounted_price_monthly": recurring_price,
+            "discountedPriceMonthly": recurring_price,
+
+            # Discount (aliases)
+            "discount_pct": RECURRING_DISCOUNT_PCT,
+            "discountPct": RECURRING_DISCOUNT_PCT,
+
+            # Also provide a nested object in case the UI expects it
+            "recurring": {
+                "price_monthly": recurring_price,
+                "priceMonthly": recurring_price,
+                "discount_pct": RECURRING_DISCOUNT_PCT,
+                "discountPct": RECURRING_DISCOUNT_PCT,
+            },
+
+            # Stripe price id (aliases)
+            "stripe_price_id": stripe_price_id,
+            "stripePriceId": stripe_price_id,
+            "price_id": stripe_price_id,
+            "priceId": stripe_price_id,
+        }
+
+        plans_out.append(plan_obj)
+
+    return {"plans": plans_out}
 
 # =========================================================
 # DB helpers
