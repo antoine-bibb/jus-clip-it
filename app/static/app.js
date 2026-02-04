@@ -1,9 +1,27 @@
+/* app.js
+   ✅ SINGLE SOURCE OF TRUTH VERSION
+   - Video upload + job creation + clip preview + captions editor
+   - Auth (login/signup/logout)
+   - Billing modal (Monthly ONLY, recurring removed)
+   - Loads plans from GET /api/billing/plans
+   - Checkout via POST /api/stripe/create-checkout-session {price_id}
+
+   Requires backend:
+   GET  /api/auth/me
+   POST /api/auth/login (FormData: username, password)
+   POST /api/auth/signup (FormData: email, username, password)
+   POST /api/auth/logout
+   GET  /api/billing/plans
+   POST /api/stripe/create-checkout-session (JSON: {price_id})
+*/
+
 const el = (id) => document.getElementById(id);
-console.log("✅ app.js loaded: AUTH + BILLING (NO TOP-UP) VERSION");
+console.log("✅ app.js loaded: SINGLE AUTH + BILLING + CLIPS VERSION");
 
 /* ----------------------------
    Elements
 ---------------------------- */
+// Core clip UI
 const videoEl = el("video");
 const clipLenEl = el("clipLen");
 const maxClipsEl = el("maxClips");
@@ -70,233 +88,19 @@ const signupUsername = el("signupUsername");
 const signupPassword = el("signupPassword");
 
 const logoutBtn = el("logoutBtn");
-const buyCreditsBtn = el("buyCreditsBtn"); // "Manage Plan"
+const buyCreditsBtn = el("buyCreditsBtn"); // “Manage Plan” button in account modal
 
-// ===============================
-// BILLING MODAL (Monthly/Recurring)
-// ===============================
+/* Billing modal */
 const billingModal = el("billingModal");
 const billingCloseBtn = el("billingCloseBtn");
 const billingStatus = el("billingStatus");
 const planGrid = el("planGrid");
 const planSaveBtn = el("planSaveBtn");
 
+// These two exist in your HTML, but we are removing recurring.
+// We’ll keep monthly and hide recurring if it exists.
 const billMonthlyBtn = el("billMonthlyBtn");
 const billRecurringBtn = el("billRecurringBtn");
-
-let BILLING_MODE = "monthly"; // "monthly" | "recurring"
-let PLANS_CACHE = [];
-let selectedPlanKey = null;
-
-// Safe getters so we never display "undefined"
-function getCredits(plan) {
-  return (
-    plan.monthly_credits ??
-    plan.monthlyCredits ??
-    plan.credits_per_month ??
-    plan.creditsPerMonth ??
-    plan.credits ??
-    0
-  );
-}
-
-function getMonthlyPrice(plan) {
-  return (
-    plan.price_monthly ??
-    plan.priceMonthly ??
-    plan.monthly_price ??
-    plan.monthlyPrice ??
-    0
-  );
-}
-
-function getRecurringPrice(plan) {
-  // Try explicit recurring fields first
-  const direct =
-    plan.recurring_price_monthly ??
-    plan.recurringPriceMonthly ??
-    plan.recurring_monthly_price ??
-    plan.recurringMonthlyPrice ??
-    plan.discounted_price_monthly ??
-    plan.discountedPriceMonthly ??
-    (plan.recurring && (plan.recurring.price_monthly ?? plan.recurring.priceMonthly));
-
-  if (direct != null && direct !== "") return Number(direct) || 0;
-
-  // Fallback: compute discount if not provided
-  const monthly = Number(getMonthlyPrice(plan)) || 0;
-  const pct = Number(plan.discount_pct ?? plan.discountPct ?? (plan.recurring && (plan.recurring.discount_pct ?? plan.recurring.discountPct)) ?? 0) || 0;
-  const discounted = monthly * (1 - pct / 100);
-  return Math.round(discounted * 100) / 100;
-}
-
-function getStripePriceId(plan) {
-  return (
-    plan.price_id ??
-    plan.priceId ??
-    plan.stripe_price_id ??
-    plan.stripePriceId ??
-    ""
-  );
-}
-
-function money(v) {
-  const n = Number(v) || 0;
-  if (n <= 0) return "Free";
-  return `$${n.toFixed(0)}/mo`;
-}
-
-function setBillingStatus(msg, kind = "") {
-  billingStatus.textContent = msg || "";
-  billingStatus.className = "status" + (kind ? ` ${kind}` : "");
-}
-
-function setBillingTab(mode) {
-  BILLING_MODE = mode;
-  billMonthlyBtn.classList.toggle("active", mode === "monthly");
-  billRecurringBtn.classList.toggle("active", mode === "recurring");
-  renderPlanGrid();
-}
-
-async function openBillingModal() {
-  billingModal.style.display = "flex";
-  planSaveBtn.disabled = true;
-  selectedPlanKey = null;
-  setBillingStatus("Loading plans...");
-
-  try {
-    const res = await fetch("/api/billing/plans", { credentials: "include" });
-    if (!res.ok) throw new Error(`Failed to load plans (${res.status})`);
-    const data = await res.json();
-
-    // Expect { plans: [...] }
-    PLANS_CACHE = Array.isArray(data.plans) ? data.plans : [];
-    if (!PLANS_CACHE.length) {
-      setBillingStatus("No plans returned from /api/billing/plans", "error");
-      planGrid.innerHTML = "";
-      return;
-    }
-
-    setBillingStatus("");
-    renderPlanGrid();
-  } catch (err) {
-    console.error(err);
-    setBillingStatus(err.message || "Failed to load plans", "error");
-  }
-}
-
-function closeBillingModal() {
-  billingModal.style.display = "none";
-}
-
-function renderPlanGrid() {
-  if (!Array.isArray(PLANS_CACHE)) return;
-
-  planGrid.innerHTML = "";
-
-  const discountPctGlobal = 10; // label only; display doesn't require it
-
-  PLANS_CACHE.forEach((plan, idx) => {
-    const key = plan.key ?? plan.id ?? plan.tier ?? String(idx);
-    const name = plan.name ?? (key[0].toUpperCase() + key.slice(1));
-    const credits = getCredits(plan);
-
-    const monthlyPrice = getMonthlyPrice(plan);
-    const recurringPrice = getRecurringPrice(plan);
-
-    const shownPrice = BILLING_MODE === "monthly" ? monthlyPrice : recurringPrice;
-
-    const isSelected = selectedPlanKey === key;
-
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "planCard" + (isSelected ? " selected" : "");
-    card.style.cssText = `
-      text-align:left;
-      background:rgba(255,255,255,.04);
-      border:1px solid rgba(255,255,255,.12);
-      border-radius:14px;
-      padding:14px;
-      cursor:pointer;
-    `;
-
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
-        <div style="font-weight:700; font-size:14px;">${name}</div>
-        <div style="font-weight:800;">${money(shownPrice)}</div>
-      </div>
-
-      <div style="margin-top:6px; opacity:.9;">
-        <div style="font-size:13px;">
-          <b>${credits}</b> credits / month • ${BILLING_MODE === "monthly" ? "Standard billing" : `Discounted`}
-        </div>
-        <div style="font-size:12px; opacity:.75; margin-top:4px;">
-          1 credit = 1 job. Credits reset monthly to your tier amount.
-        </div>
-      </div>
-    `;
-
-    card.addEventListener("click", () => {
-      selectedPlanKey = key;
-      planSaveBtn.disabled = false;
-      renderPlanGrid();
-    });
-
-    planGrid.appendChild(card);
-  });
-}
-
-// Click handlers for tabs
-billMonthlyBtn?.addEventListener("click", () => setBillingTab("monthly"));
-billRecurringBtn?.addEventListener("click", () => setBillingTab("recurring"));
-
-// Close button
-billingCloseBtn?.addEventListener("click", closeBillingModal);
-
-// Save plan: if you’re using Stripe checkout
-planSaveBtn?.addEventListener("click", async () => {
-  if (!selectedPlanKey) return;
-
-  const plan = PLANS_CACHE.find(p => (p.key ?? p.id ?? p.tier) === selectedPlanKey);
-  if (!plan) return;
-
-  // Free plan shortcut (no Stripe)
-  const monthlyPrice = Number(getMonthlyPrice(plan)) || 0;
-  if (monthlyPrice <= 0) {
-    setBillingStatus("Free plan selected. (If you want, we can add a /api/billing/set-free endpoint.)", "");
-    closeBillingModal();
-    return;
-  }
-
-  const priceId = getStripePriceId(plan);
-  if (!priceId) {
-    setBillingStatus("This plan is missing a Stripe Price ID in /api/billing/plans.", "error");
-    return;
-  }
-
-  setBillingStatus("Redirecting to Stripe Checkout...");
-
-  try {
-    const res = await fetch("/api/stripe/create-checkout-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ price_id: priceId }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `Checkout failed (${res.status})`);
-
-    if (!data.url) throw new Error("Stripe session URL missing");
-    window.location.href = data.url;
-  } catch (err) {
-    console.error(err);
-    setBillingStatus(err.message || "Checkout failed", "error");
-  }
-});
-
-// Expose openBillingModal if your UI triggers it elsewhere
-window.openBillingModal = openBillingModal();
 
 /* ----------------------------
    State
@@ -308,10 +112,10 @@ let me = null; // {email, username, credits, plan, billing, next_reset_at}
 
 let authWaitResolve = null;
 
-/* Billing state */
-let plansCache = null; // from /api/billing/plans
-let billingMode = "monthly"; // "monthly" | "monthly_recurring"
-let selectedPlan = null; // "free" | "basic" | "plus" | "pro"
+// Billing state (SINGLE)
+let plansCacheArr = [];     // array of plans from /api/billing/plans
+let selectedPlanKey = null; // "free" | "basic" | "plus" | "pro"
+let selectedPriceId = "";   // Stripe price id
 
 /* ----------------------------
    Utils
@@ -360,11 +164,53 @@ function fmtPlanName(key) {
   return map[key] || key;
 }
 
+function moneyMonthly(v) {
+  const n = Number(v) || 0;
+  if (n <= 0) return "Free";
+  return `$${n.toFixed(0)}/mo`;
+}
+
+// Safe getters (your backend returns lots of aliases)
+function getPlanKey(plan, idx) {
+  return plan.key ?? plan.id ?? plan.tier ?? String(idx);
+}
+function getPlanName(plan, key) {
+  return plan.name ?? (key ? key[0].toUpperCase() + key.slice(1) : "Plan");
+}
+function getCreditsFromPlan(plan) {
+  return (
+    plan.monthly_credits ??
+    plan.monthlyCredits ??
+    plan.credits_per_month ??
+    plan.creditsPerMonth ??
+    plan.credits ??
+    0
+  );
+}
+function getMonthlyPriceFromPlan(plan) {
+  return (
+    plan.price_monthly ??
+    plan.priceMonthly ??
+    plan.monthly_price ??
+    plan.monthlyPrice ??
+    0
+  );
+}
+function getStripePriceId(plan) {
+  return (
+    plan.price_id ??
+    plan.priceId ??
+    plan.stripe_price_id ??
+    plan.stripePriceId ??
+    ""
+  );
+}
+
 /* ----------------------------
    API: Auth
 ---------------------------- */
 async function apiMe() {
-  const r = await fetch("/api/auth/me");
+  const r = await fetch("/api/auth/me", { credentials: "include" });
   if (!r.ok) return null;
   return await r.json();
 }
@@ -373,7 +219,13 @@ async function apiLogin(username, password) {
   const form = new FormData();
   form.append("username", username);
   form.append("password", password);
-  const r = await fetch("/api/auth/login", { method: "POST", body: form });
+
+  const r = await fetch("/api/auth/login", {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || "Login failed");
   return data;
@@ -384,34 +236,47 @@ async function apiSignup(email, username, password) {
   form.append("email", email);
   form.append("username", username);
   form.append("password", password);
-  const r = await fetch("/api/auth/signup", { method: "POST", body: form });
+
+  const r = await fetch("/api/auth/signup", {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || "Signup failed");
   return data;
 }
 
 async function apiLogout() {
-  const r = await fetch("/api/auth/logout", { method: "POST" });
+  const r = await fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "include",
+  });
   if (!r.ok) return null;
   return await r.json().catch(() => ({}));
 }
 
-/* Billing endpoints */
+/* ----------------------------
+   API: Billing
+---------------------------- */
 async function apiBillingPlans() {
-  const r = await fetch("/api/billing/plans");
+  const r = await fetch("/api/billing/plans", { credentials: "include" });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || "Failed to load plans");
-  return data;
+  return data; // {plans:[...]}
 }
 
-async function apiSetPlan(plan, billing) {
-  const form = new FormData();
-  form.append("plan", plan);
-  form.append("billing", billing);
-  const r = await fetch("/api/billing/set_plan", { method: "POST", body: form });
+async function apiCreateCheckoutSession(priceId) {
+  const r = await fetch("/api/stripe/create-checkout-session", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ price_id: priceId }),
+  });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || "Failed to set plan");
-  return data; // {ok, plan, billing, credits, next_reset_at}
+  if (!r.ok) throw new Error(data.detail || `Checkout failed (${r.status})`);
+  return data; // {url}
 }
 
 /* ----------------------------
@@ -431,13 +296,13 @@ function openAuthModal(mode = "login") {
     loginUsername?.focus();
   }
 
-  // show account actions if logged in
+  // Show account actions if logged in
   if (me?.username) {
-    logoutBtn.style.display = "inline-flex";
-    buyCreditsBtn.style.display = "inline-flex";
+    if (logoutBtn) logoutBtn.style.display = "inline-flex";
+    if (buyCreditsBtn) buyCreditsBtn.style.display = "inline-flex";
   } else {
-    logoutBtn.style.display = "none";
-    buyCreditsBtn.style.display = "none";
+    if (logoutBtn) logoutBtn.style.display = "none";
+    if (buyCreditsBtn) buyCreditsBtn.style.display = "none";
   }
 }
 
@@ -464,7 +329,7 @@ tabLogin?.addEventListener("click", () => setTab("login"));
 tabSignup?.addEventListener("click", () => setTab("signup"));
 authCloseBtn?.addEventListener("click", closeAuthModal);
 
-// click outside card closes
+// Click outside card closes
 authModal?.addEventListener("mousedown", (e) => {
   if (e.target === authModal) closeAuthModal();
 });
@@ -490,14 +355,13 @@ logoutBtn?.addEventListener("click", async () => {
   setStatus("Logged out.");
 });
 
-/* Handle login submit */
+/* Login submit */
 loginForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   hideAuthError();
 
   const u = (loginUsername?.value || "").trim();
   const p = (loginPassword?.value || "").trim();
-
   if (!u || !p) return showAuthError("Enter username/email and password.");
 
   try {
@@ -517,7 +381,7 @@ loginForm?.addEventListener("submit", async (e) => {
   }
 });
 
-/* Handle signup submit */
+/* Signup submit */
 signupForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
   hideAuthError();
@@ -556,46 +420,59 @@ async function ensureLoggedIn() {
     authWaitResolve = resolve;
   });
 }
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("authBtn");
-  if (!btn) {
-    console.warn("authBtn not found");
+
+/* ----------------------------
+   Billing modal (Monthly ONLY)
+---------------------------- */
+function setBillingStatus(msg, kind = "") {
+  if (!billingStatus) return;
+  billingStatus.textContent = msg || "";
+  billingStatus.className = "status" + (kind ? ` ${kind}` : "");
+}
+
+async function openBillingModal() {
+  if (!billingModal) return;
+
+  // Must be logged in
+  me = await apiMe();
+  if (!me?.username) {
+    openAuthModal("login");
     return;
   }
 
-  btn.addEventListener("click", () => {
-    // change this id to your real auth modal id if different
-    const modal = document.getElementById("authModal");
-    if (!modal) {
-      console.warn("authModal not found — add your auth modal to the page or fix the id");
+  billingModal.style.display = "flex";
+  selectedPlanKey = null;
+  selectedPriceId = "";
+  if (planSaveBtn) planSaveBtn.disabled = true;
+
+  // Hide recurring tab if it exists
+  if (billRecurringBtn) billRecurringBtn.style.display = "none";
+  if (billMonthlyBtn) billMonthlyBtn.style.display = "inline-flex";
+
+  setBillingStatus("Loading plans...");
+
+  try {
+    const data = await apiBillingPlans();
+    plansCacheArr = Array.isArray(data.plans) ? data.plans : [];
+
+    if (!plansCacheArr.length) {
+      setBillingStatus("No plans returned from /api/billing/plans", "error");
+      if (planGrid) planGrid.innerHTML = "";
       return;
     }
-    modal.style.display = "flex";
-  });
-});
 
-/* ----------------------------
-   Billing modal
----------------------------- */
-function openBillingModal() {
-  if (!billingModal) return;
-  billingModal.style.display = "grid";
-  if (billingStatus) billingStatus.textContent = "Loading plans...";
-  planSaveBtn.disabled = true;
-
-  // default selections
-  billingMode = "monthly";
-  selectedPlan = me?.plan || "free";
-  updateBillingTabs();
-  loadAndRenderPlans().catch((e) => {
-    if (billingStatus) billingStatus.textContent = `Failed: ${e.message || e}`;
-  });
+    setBillingStatus("");
+    renderPlanGrid();
+  } catch (err) {
+    console.error(err);
+    setBillingStatus(err.message || "Failed to load plans", "error");
+  }
 }
 
 function closeBillingModal() {
   if (!billingModal) return;
   billingModal.style.display = "none";
-  if (billingStatus) billingStatus.textContent = "";
+  setBillingStatus("");
 }
 
 billingCloseBtn?.addEventListener("click", closeBillingModal);
@@ -603,121 +480,123 @@ billingModal?.addEventListener("mousedown", (e) => {
   if (e.target === billingModal) closeBillingModal();
 });
 
-function updateBillingTabs() {
-  billMonthlyBtn?.classList.toggle("active", billingMode === "monthly");
-  billRecurringBtn?.classList.toggle("active", billingMode === "monthly_recurring");
-}
-
+// Click Monthly (just keeps active style)
 billMonthlyBtn?.addEventListener("click", () => {
-  billingMode = "monthly";
-  updateBillingTabs();
-  renderPlans();
+  billMonthlyBtn.classList.add("active");
 });
 
-billRecurringBtn?.addEventListener("click", () => {
-  billingMode = "monthly_recurring";
-  updateBillingTabs();
-  renderPlans();
-});
+function renderPlanGrid() {
+  if (!planGrid) return;
+  planGrid.innerHTML = "";
 
-async function loadAndRenderPlans() {
-  plansCache = await apiBillingPlans();
-  renderPlans();
-}
+  plansCacheArr.forEach((plan, idx) => {
+    const key = getPlanKey(plan, idx);
+    const name = getPlanName(plan, key);
+    const credits = Number(getCreditsFromPlan(plan)) || 0;
+    const monthlyPrice = Number(getMonthlyPriceFromPlan(plan)) || 0;
+    const priceId = getStripePriceId(plan);
 
-function planCardHtml(planKey, planObj, discountPct) {
-  const credits = planObj.monthly_credits;
-  const priceMonthly = planObj.price_monthly;
-  const priceRecurring = planObj.price_monthly_recurring;
+    const isSelected = selectedPlanKey === key;
 
-  const price = billingMode === "monthly_recurring" ? priceRecurring : priceMonthly;
-  const priceLabel = price === 0 ? "Free" : `$${price}/mo`;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "planCard" + (isSelected ? " selected" : "");
+    card.style.textAlign = "left";
 
-  const subline =
-    billingMode === "monthly_recurring" && priceMonthly > 0
-      ? `Discounted (−${discountPct}%)`
-      : "Standard billing";
-
-  const isActive = selectedPlan === planKey;
-
-  return `
-    <button type="button"
-      class="tab ${isActive ? "active" : ""}"
-      data-plan="${planKey}"
-      style="text-align:left;padding:14px;border-radius:16px;display:block;width:100%;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
-        <div style="font-weight:900;font-size:16px;">${fmtPlanName(planKey)}</div>
-        <div style="font-weight:900;">${priceLabel}</div>
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+        <div style="font-weight:800; font-size:14px;">${esc(name)}</div>
+        <div style="font-weight:900;">${esc(moneyMonthly(monthlyPrice))}</div>
       </div>
-      <div style="opacity:.8;margin-top:6px;">
-        ${credits} credits / month
-        <span style="opacity:.7;">• ${subline}</span>
+      <div style="margin-top:6px; opacity:.9;">
+        <div style="font-size:13px;"><b>${credits}</b> credits / month</div>
+        <div style="font-size:12px; opacity:.7; margin-top:4px;">
+          1 credit = 1 job. Credits reset monthly to your tier amount.
+        </div>
       </div>
-      <div style="opacity:.65;font-size:12px;margin-top:6px;">
-        1 credit = 1 job. Credits reset monthly to your tier amount.
-      </div>
-    </button>
-  `;
-}
+    `;
 
-function renderPlans() {
-  if (!planGrid || !plansCache?.plans) return;
+    card.addEventListener("click", () => {
+      selectedPlanKey = key;
+      selectedPriceId = priceId || "";
 
-  const discountPct = plansCache.recurring_discount_pct ?? 0;
-  const plans = plansCache.plans;
+      // enable save:
+      // - Free plan: allow close
+      // - Paid plan: require price id
+      if (planSaveBtn) {
+        if (monthlyPrice <= 0) {
+          planSaveBtn.disabled = false;
+          planSaveBtn.textContent = "Use Free";
+        } else {
+          planSaveBtn.disabled = !selectedPriceId;
+          planSaveBtn.textContent = "Checkout";
+        }
+      }
 
-  planGrid.innerHTML = Object.keys(plans)
-    .map((k) => planCardHtml(k, plans[k], discountPct))
-    .join("");
+      if (monthlyPrice > 0 && !selectedPriceId) {
+        setBillingStatus("Missing Stripe Price ID for this plan. Check Render env vars.", "error");
+      } else {
+        setBillingStatus("");
+      }
 
-  [...planGrid.querySelectorAll("[data-plan]")].forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedPlan = btn.dataset.plan;
-      renderPlans();
-      planSaveBtn.disabled = !selectedPlan;
+      // Update selected styles
+      [...planGrid.querySelectorAll(".planCard")].forEach((x) => x.classList.remove("selected"));
+      card.classList.add("selected");
     });
+
+    planGrid.appendChild(card);
   });
 
-  if (billingStatus) billingStatus.textContent = "";
-  planSaveBtn.disabled = !selectedPlan;
+  if (planSaveBtn) {
+    planSaveBtn.disabled = true;
+    planSaveBtn.textContent = "Save Plan";
+  }
 }
 
 planSaveBtn?.addEventListener("click", async () => {
-  if (!selectedPlan) return;
+  if (!selectedPlanKey) return;
 
+  // Find selected plan object
+  const plan = plansCacheArr.find((p, idx) => getPlanKey(p, idx) === selectedPlanKey);
+  if (!plan) return;
+
+  const monthlyPrice = Number(getMonthlyPriceFromPlan(plan)) || 0;
+
+  // Free plan just closes (you aren’t changing plan server-side for free; signup already sets free)
+  if (monthlyPrice <= 0) {
+    setBillingStatus("Free plan selected ✅", "ok");
+    setTimeout(() => closeBillingModal(), 350);
+    return;
+  }
+
+  // Paid plan -> checkout
+  if (!selectedPriceId) {
+    setBillingStatus("Missing Stripe Price ID for this plan.", "error");
+    return;
+  }
+
+  setBillingStatus("Redirecting to Stripe Checkout...");
   planSaveBtn.disabled = true;
-  const old = planSaveBtn.textContent;
-  planSaveBtn.textContent = "Saving...";
 
   try {
-    const data = await apiSetPlan(selectedPlan, billingMode);
-
-    // Keep consistent user object for UI
-    me = me ? { ...me, ...data } : data;
-    if (typeof data.credits !== "undefined") setCredits(data.credits);
-
-    if (billingStatus) billingStatus.textContent = "Saved ✅";
-    setStatus(`Plan updated to ${fmtPlanName(data.plan)}.`);
-    setTimeout(() => closeBillingModal(), 500);
-  } catch (e) {
-    if (billingStatus) billingStatus.textContent = `Save failed: ${e.message || e}`;
-  } finally {
-    planSaveBtn.textContent = old || "Save Plan";
+    const data = await apiCreateCheckoutSession(selectedPriceId);
+    if (!data.url) throw new Error("Stripe session URL missing");
+    window.location.href = data.url;
+  } catch (err) {
+    console.error(err);
+    setBillingStatus(err.message || "Checkout failed", "error");
     planSaveBtn.disabled = false;
   }
 });
 
-/* Hook Manage Plan button */
+// “Manage Plan” button inside account modal opens billing modal
 buyCreditsBtn?.addEventListener("click", async () => {
-  const session = await apiMe();
-  if (!session?.ok) {
-    alert("Please log in first.");
-    return;
-  }
-  me = session;
   closeAuthModal();
-  openBillingModal();
+  await openBillingModal();
 });
+
+// IMPORTANT: expose function correctly (DO NOT CALL IT HERE)
+window.openBillingModal = openBillingModal;
 
 /* ----------------------------
    Caption style + karaoke
@@ -728,7 +607,7 @@ function applyStyle() {
   cap.style.fontSize = `${clamp(fontSizeEl?.value ?? 35, 18, 120)}px`;
   cap.style.left = `${clamp(posXEl?.value ?? 50, 0, 100)}%`;
   cap.style.top = `${clamp(posYEl?.value ?? 78, 0, 100)}%`;
-  cap.style.color = (colorEl?.value || "#ffffff");
+  cap.style.color = colorEl?.value || "#ffffff";
 
   const sw = Math.max(0, Number(strokeWidthEl?.value ?? 2));
   const stroke = strokeEl?.value || "#000000";
@@ -749,10 +628,13 @@ function renderKaraoke(t) {
     return;
   }
 
-  let idx = words.findIndex(w => t >= w.start && t <= w.end);
+  let idx = words.findIndex((w) => t >= w.start && t <= w.end);
   if (idx < 0) {
     for (let i = words.length - 1; i >= 0; i--) {
-      if (t >= words[i].end) { idx = i; break; }
+      if (t >= words[i].end) {
+        idx = i;
+        break;
+      }
     }
   }
   if (idx < 0) idx = 0;
@@ -774,24 +656,26 @@ function renderKaraoke(t) {
   const slice = words.slice(s, e);
   const hi = hiEl?.value || "#ff2a2a";
 
-  cap.innerHTML = slice.map((w, i) => {
-    const gi = s + i;
-    const safe = esc(w.word);
-    if (gi === idx) {
-      return `<span style="background:${hi}55;padding:2px 10px;border-radius:10px;">${safe}</span>`;
-    }
-    return `<span style="opacity:.9">${safe}</span>`;
-  }).join(" ");
+  cap.innerHTML = slice
+    .map((w, i) => {
+      const gi = s + i;
+      const safe = esc(w.word);
+      if (gi === idx) {
+        return `<span style="background:${hi}55;padding:2px 10px;border-radius:10px;">${safe}</span>`;
+      }
+      return `<span style="opacity:.9">${safe}</span>`;
+    })
+    .join(" ");
 }
 
 async function loadWords(jobId, idx) {
-  const r = await fetch(`/api/jobs/${jobId}/clips/${idx}/words`);
+  const r = await fetch(`/api/jobs/${jobId}/clips/${idx}/words`, { credentials: "include" });
   if (!r.ok) throw new Error("Failed to load words");
   const data = await r.json();
-  words = (data.words || []).map(w => ({
+  words = (data.words || []).map((w) => ({
     word: w.word,
     start: Number(w.start || 0),
-    end: Number(w.end || 0)
+    end: Number(w.end || 0),
   }));
 }
 
@@ -809,7 +693,7 @@ function clipRow(jobId, c) {
       ${thumbTag}
       <div class="clipMeta">
         <div class="title">Clip #${c.index}</div>
-        <div class="sub">${Math.round((c.end - c.start))}s</div>
+        <div class="sub">${Math.round(c.end - c.start)}s</div>
       </div>
       <div class="clipBtns">
         <button class="pvBtn" data-idx="${c.index}">Preview</button>
@@ -820,7 +704,7 @@ function clipRow(jobId, c) {
 }
 
 async function refreshClips(jobId) {
-  const r = await fetch(`/api/jobs/${jobId}/clips`);
+  const r = await fetch(`/api/jobs/${jobId}/clips`, { credentials: "include" });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
     setStatus(d.detail || "Failed to load clips.");
@@ -829,16 +713,16 @@ async function refreshClips(jobId) {
   const data = await r.json();
   const clips = data.clips || [];
 
-  clipsEl.innerHTML = clips.map(c => clipRow(jobId, c)).join("");
+  if (clipsEl) clipsEl.innerHTML = clips.map((c) => clipRow(jobId, c)).join("");
 
-  [...clipsEl.querySelectorAll(".pvBtn")].forEach(btn => {
+  [...(clipsEl?.querySelectorAll(".pvBtn") || [])].forEach((btn) => {
     btn.addEventListener("click", async () => {
       const idx = Number(btn.dataset.idx);
       await previewClip(jobId, idx);
     });
   });
 
-  [...clipsEl.querySelectorAll(".editBtn")].forEach(btn => {
+  [...(clipsEl?.querySelectorAll(".editBtn") || [])].forEach((btn) => {
     btn.addEventListener("click", async () => {
       const idx = Number(btn.dataset.idx);
       await openSrtEditor(jobId, idx);
@@ -852,12 +736,14 @@ async function refreshClips(jobId) {
 async function previewClip(jobId, idx) {
   currentIdx = idx;
 
-  pv.src = `/api/jobs/${jobId}/clips/${idx}/video`;
-  pv.currentTime = 0;
-  pv.load();
+  if (pv) {
+    pv.src = `/api/jobs/${jobId}/clips/${idx}/video`;
+    pv.currentTime = 0;
+    pv.load();
+  }
 
-  dlSrt.href = `/api/jobs/${jobId}/clips/${idx}/captions.srt`;
-  dlJson.href = `/api/jobs/${jobId}/clips/${idx}/captions.json`;
+  if (dlSrt) dlSrt.href = `/api/jobs/${jobId}/clips/${idx}/captions.srt`;
+  if (dlJson) dlJson.href = `/api/jobs/${jobId}/clips/${idx}/captions.json`;
 
   setStatus(`Loading word timings for clip ${idx}...`);
   try {
@@ -867,9 +753,9 @@ async function previewClip(jobId, idx) {
     setStatus(`Previewing clip ${idx}.`);
   } catch (e) {
     console.error(e);
-    setStatus(`Previewing clip ${idx} (but word timings failed).`);
+    setStatus(`Previewing clip ${idx} (word timings failed).`);
     words = [];
-    cap.textContent = "";
+    if (cap) cap.textContent = "";
   }
 }
 
@@ -887,9 +773,8 @@ function hideSrtModal() {
 }
 
 async function fetchSrt(jobId, idx) {
-  let r = await fetch(`/api/jobs/${jobId}/clips/${idx}/captions`);
-  if (r.ok) return await r.text();
-  r = await fetch(`/api/jobs/${jobId}/clips/${idx}/captions.srt`);
+  // You have POST save endpoint; GET is handled via captions.srt
+  const r = await fetch(`/api/jobs/${jobId}/clips/${idx}/captions.srt`, { credentials: "include" });
   if (r.ok) return await r.text();
   throw new Error("Could not load SRT");
 }
@@ -899,7 +784,8 @@ async function saveSrt(jobId, idx, srtText) {
   form.append("srt_text", srtText || "");
   const r = await fetch(`/api/jobs/${jobId}/clips/${idx}/captions`, {
     method: "POST",
-    body: form
+    credentials: "include",
+    body: form,
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
@@ -944,8 +830,10 @@ saveSrtBtn?.addEventListener("click", async () => {
   try {
     await saveSrt(currentJob, currentIdx, srtBox.value);
     if (srtStatus) srtStatus.textContent = "Saved ✅";
-    try { await loadWords(currentJob, currentIdx); } catch {}
-    renderKaraoke(pv.currentTime || 0);
+    try {
+      await loadWords(currentJob, currentIdx);
+    } catch {}
+    renderKaraoke(pv?.currentTime || 0);
   } catch (e) {
     console.error(e);
     if (srtStatus) srtStatus.textContent = `Save failed: ${e.message || e}`;
@@ -959,8 +847,16 @@ saveSrtBtn?.addEventListener("click", async () => {
    Palettes
 ---------------------------- */
 const DEFAULT_SWATCHES = [
-  "#ffffff", "#000000", "#ff2a2a", "#ffd400", "#00e5ff", "#7c4dff",
-  "#00ff7a", "#ff6d00", "#ff2bd6", "#bdbdbd"
+  "#ffffff",
+  "#000000",
+  "#ff2a2a",
+  "#ffd400",
+  "#00e5ff",
+  "#7c4dff",
+  "#00ff7a",
+  "#ff6d00",
+  "#ff2bd6",
+  "#bdbdbd",
 ];
 
 function buildPalette(container, hiddenInput, initial) {
@@ -971,16 +867,16 @@ function buildPalette(container, hiddenInput, initial) {
 
   function setActive(hex) {
     hiddenInput.value = hex;
-    [...container.querySelectorAll(".swatch")].forEach(s => {
+    [...container.querySelectorAll(".swatch")].forEach((s) => {
       s.classList.toggle("active", s.dataset.hex === hex);
     });
     applyStyle();
-    renderKaraoke(pv.currentTime || 0);
+    renderKaraoke(pv?.currentTime || 0);
   }
 
-  container.innerHTML = swatches.map(hex =>
-    `<div class="swatch" data-hex="${hex}" title="${hex}" style="background:${hex};"></div>`
-  ).join("");
+  container.innerHTML = swatches
+    .map((hex) => `<div class="swatch" data-hex="${hex}" title="${hex}" style="background:${hex};"></div>`)
+    .join("");
 
   container.addEventListener("click", (e) => {
     const sw = e.target.closest(".swatch");
@@ -1003,18 +899,18 @@ function initPalettes() {
 const RES_BY_ASPECT = {
   "9:16": ["1080x1920", "720x1280", "1440x2560"],
   "1:1": ["1080x1080", "720x720"],
-  "16:9": ["1920x1080", "1280x720"]
+  "16:9": ["1920x1080", "1280x720"],
 };
 
 function fillResOptions(aspect) {
   if (!outResEl) return;
   const opts = RES_BY_ASPECT[aspect] || RES_BY_ASPECT["9:16"];
-  outResEl.innerHTML = opts.map(x => `<option value="${x}">${x}</option>`).join("");
+  outResEl.innerHTML = opts.map((x) => `<option value="${x}">${x}</option>`).join("");
 }
 
 function updateManualVisibility() {
   if (!manualCropBox || !cropModeEl) return;
-  manualCropBox.style.display = (cropModeEl.value === "manual") ? "block" : "none";
+  manualCropBox.style.display = cropModeEl.value === "manual" ? "block" : "none";
 }
 
 outAspectEl?.addEventListener("change", () => fillResOptions(outAspectEl.value));
@@ -1027,8 +923,11 @@ goBtn?.addEventListener("click", async () => {
   const ok = await ensureLoggedIn();
   if (!ok) return;
 
-  const f = videoEl.files?.[0];
-  if (!f) { alert("Pick an mp4 first."); return; }
+  const f = videoEl?.files?.[0];
+  if (!f) {
+    alert("Pick an mp4 first.");
+    return;
+  }
 
   goBtn.disabled = true;
   const old = goBtn.textContent;
@@ -1038,8 +937,8 @@ goBtn?.addEventListener("click", async () => {
 
   const form = new FormData();
   form.append("video", f);
-  form.append("clip_len", clipLenEl.value || "25");
-  form.append("max_clips", maxClipsEl.value || "8");
+  form.append("clip_len", clipLenEl?.value || "25");
+  form.append("max_clips", maxClipsEl?.value || "8");
 
   // crop + output
   const aspect = outAspectEl?.value || "9:16";
@@ -1056,7 +955,7 @@ goBtn?.addEventListener("click", async () => {
   form.append("crop_w", String(cropWEl?.value ?? 56));
   form.append("crop_h", String(cropHEl?.value ?? 100));
 
-  const r = await fetch("/api/jobs", { method: "POST", body: form });
+  const r = await fetch("/api/jobs", { method: "POST", credentials: "include", body: form });
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok) {
@@ -1090,11 +989,11 @@ goBtn?.addEventListener("click", async () => {
 ---------------------------- */
 pv?.addEventListener("timeupdate", () => renderKaraoke(pv.currentTime));
 
-[fontSizeEl, wordWindowEl, strokeWidthEl, posXEl, posYEl].forEach(x => {
+[fontSizeEl, wordWindowEl, strokeWidthEl, posXEl, posYEl].forEach((x) => {
   if (!x) return;
   x.addEventListener("input", () => {
     applyStyle();
-    renderKaraoke(pv.currentTime || 0);
+    renderKaraoke(pv?.currentTime || 0);
   });
 });
 
@@ -1102,16 +1001,17 @@ pv?.addEventListener("timeupdate", () => renderKaraoke(pv.currentTime));
    Init
 ---------------------------- */
 (async function init() {
+  // recurring tab removed
+  if (billRecurringBtn) billRecurringBtn.style.display = "none";
+  if (billMonthlyBtn) billMonthlyBtn.classList.add("active");
+
   applyStyle();
   initPalettes();
   fillResOptions(outAspectEl?.value || "9:16");
   updateManualVisibility();
 
   me = await apiMe();
-  if (me?.username) {
-    setCredits(me.credits);
-  } else {
-    setCredits(0);
-  }
+  if (me?.username) setCredits(me.credits);
+  else setCredits(0);
   setAuthLabel();
 })();
