@@ -83,7 +83,27 @@ body{
   font-size: 18px;
 }
 
+.hero {
+  max-width: 900px;
+  margin: 60px auto 40px;
+  padding: 0 20px;
+  text-align: center;
+}
 
+.hero h1 {
+  font-size: 42px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #ffffff;
+}
+
+.hero p {
+  font-size: 18px;
+  line-height: 1.6;
+  opacity: 0.85;
+  max-width: 720px;
+  margin: auto;
+}
 /* ============================
    Footer (always visible)
 ============================ */
