@@ -350,6 +350,25 @@ def home():
     if not index_path.exists():
         return HTMLResponse("<h1>Missing app/templates/index.html</h1>", status_code=500)
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
+from fastapi.responses import HTMLResponse
+
+def serve_template_file(filename: str) -> HTMLResponse:
+    path = TEMPLATES_DIR / filename
+    if not path.exists():
+        return HTMLResponse(f"<h1>Missing {filename}</h1>", status_code=404)
+    return HTMLResponse(path.read_text(encoding="utf-8"))
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms_page():
+    return serve_template_file("terms.html")
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_page():
+    return serve_template_file("privacy.html")
+
+@app.get("/refunds", response_class=HTMLResponse)
+def refunds_page():
+    return serve_template_file("refunds.html")
 
 # =========================================================
 # Billing helper endpoint (fixes your 404)
