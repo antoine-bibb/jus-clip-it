@@ -556,6 +556,23 @@ async function ensureLoggedIn() {
     authWaitResolve = resolve;
   });
 }
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("authBtn");
+  if (!btn) {
+    console.warn("authBtn not found");
+    return;
+  }
+
+  btn.addEventListener("click", () => {
+    // change this id to your real auth modal id if different
+    const modal = document.getElementById("authModal");
+    if (!modal) {
+      console.warn("authModal not found — add your auth modal to the page or fix the id");
+      return;
+    }
+    modal.style.display = "flex";
+  });
+});
 
 /* ----------------------------
    Billing modal

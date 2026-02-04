@@ -60,11 +60,16 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 
+STRIPE_PRICE_BASIC = os.getenv("STRIPE_PRICE_BASIC", "").strip()
+STRIPE_PRICE_PLUS = os.getenv("STRIPE_PRICE_PLUS", "").strip()
+STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "").strip()
+
 STRIPE_PRICE_TO_PLAN = {
-    os.getenv("STRIPE_PRICE_BASIC", "").strip(): "basic",
-    os.getenv("STRIPE_PRICE_PLUS", "").strip(): "plus",
-    os.getenv("STRIPE_PRICE_PRO", "").strip(): "pro",
+    STRIPE_PRICE_BASIC: "basic",
+    STRIPE_PRICE_PLUS: "plus",
+    STRIPE_PRICE_PRO: "pro",
 }
+# remove empty keys (so lookups work cleanly)
 STRIPE_PRICE_TO_PLAN = {k: v for k, v in STRIPE_PRICE_TO_PLAN.items() if k}
 
 # =========================================================
@@ -81,86 +86,6 @@ TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-@app.get("/api/billing/plans")
-def billing_plans():
-    """
-    Returns plan data in multiple key styles so the frontend never shows undefined.
-    """
-
-    RECURRING_DISCOUNT_PCT = 10  # change if you want
-
-    ordered = ["free", "basic", "plus", "pro"]
-    plans_out = []
-
-    for key in ordered:
-        p = PLANS.get(key)
-        if not p:
-            continue
-
-        credits = int(p.get("monthly_credits", 0))
-        monthly_price = float(p.get("price_monthly", 0))
-
-        # Recurring = discounted monthly equivalent (you can treat this as "annual paid monthly" etc.)
-        recurring_price = round(monthly_price * (1 - (RECURRING_DISCOUNT_PCT / 100.0)), 2)
-
-        stripe_price_id = ""
-        if key == "basic":
-            stripe_price_id = os.getenv("STRIPE_PRICE_BASIC", "").strip()
-        elif key == "plus":
-            stripe_price_id = os.getenv("STRIPE_PRICE_PLUS", "").strip()
-        elif key == "pro":
-            stripe_price_id = os.getenv("STRIPE_PRICE_PRO", "").strip()
-
-        # Build one plan object with LOTS of aliases
-        plan_obj = {
-            "key": key,
-            "id": key,                 # alias
-            "tier": key,               # alias
-            "name": key.capitalize(),
-
-            # Credits (aliases)
-            "monthly_credits": credits,
-            "monthlyCredits": credits,
-            "credits": credits,
-            "credits_per_month": credits,
-            "creditsPerMonth": credits,
-
-            # Monthly pricing (aliases)
-            "price_monthly": monthly_price,
-            "priceMonthly": monthly_price,
-            "monthly_price": monthly_price,
-            "monthlyPrice": monthly_price,
-
-            # Recurring pricing (aliases)
-            "recurring_price_monthly": recurring_price,
-            "recurringPriceMonthly": recurring_price,
-            "recurring_monthly_price": recurring_price,
-            "recurringMonthlyPrice": recurring_price,
-            "discounted_price_monthly": recurring_price,
-            "discountedPriceMonthly": recurring_price,
-
-            # Discount (aliases)
-            "discount_pct": RECURRING_DISCOUNT_PCT,
-            "discountPct": RECURRING_DISCOUNT_PCT,
-
-            # Also provide a nested object in case the UI expects it
-            "recurring": {
-                "price_monthly": recurring_price,
-                "priceMonthly": recurring_price,
-                "discount_pct": RECURRING_DISCOUNT_PCT,
-                "discountPct": RECURRING_DISCOUNT_PCT,
-            },
-
-            # Stripe price id (aliases)
-            "stripe_price_id": stripe_price_id,
-            "stripePriceId": stripe_price_id,
-            "price_id": stripe_price_id,
-            "priceId": stripe_price_id,
-        }
-
-        plans_out.append(plan_obj)
-
-    return {"plans": plans_out}
 
 # =========================================================
 # DB helpers
@@ -169,6 +94,7 @@ def db_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def db_init():
     conn = db_conn()
@@ -199,6 +125,7 @@ def db_init():
         );
         """)
 
+        # ---- MIGRATIONS (safe) ----
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(users);").fetchall()}
 
         def add_col(sql: str):
@@ -219,6 +146,7 @@ def db_init():
     finally:
         conn.close()
 
+
 @app.on_event("startup")
 def _startup():
     db_init()
@@ -229,10 +157,12 @@ def _startup():
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 COOKIE_NAME = "jc_session"
 
+
 def _hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
     return "pbkdf2_sha256$120000$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()
+
 
 def _verify_password(password: str, stored: str) -> bool:
     try:
@@ -246,6 +176,7 @@ def _verify_password(password: str, stored: str) -> bool:
         return hmac.compare_digest(dk, dk_expected)
     except Exception:
         return False
+
 
 def _create_session(user_id: str, days: int = 14) -> Dict[str, Any]:
     token = secrets.token_urlsafe(32)
@@ -263,6 +194,7 @@ def _create_session(user_id: str, days: int = 14) -> Dict[str, Any]:
         conn.close()
 
     return {"token": token, "expires_at": expires}
+
 
 def _get_user_by_session(token: str) -> Optional[sqlite3.Row]:
     conn = db_conn()
@@ -282,6 +214,7 @@ def _get_user_by_session(token: str) -> Optional[sqlite3.Row]:
     finally:
         conn.close()
 
+
 def _delete_session(token: str):
     conn = db_conn()
     try:
@@ -290,7 +223,14 @@ def _delete_session(token: str):
     finally:
         conn.close()
 
+# ============================
+# CREDIT RESET
+# ============================
 def _maybe_reset_credits(user_id: str) -> sqlite3.Row:
+    """
+    Free tier resets to 10 every 30 days
+    Paid plans reset to their monthly credits every 30 days
+    """
     conn = db_conn()
     try:
         u = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -327,6 +267,7 @@ def _maybe_reset_credits(user_id: str) -> sqlite3.Row:
     finally:
         conn.close()
 
+
 def get_current_user(request: Request) -> sqlite3.Row:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -335,6 +276,7 @@ def get_current_user(request: Request) -> sqlite3.Row:
     if not u:
         raise HTTPException(status_code=401, detail="Session expired. Please login again.")
     return _maybe_reset_credits(u["id"])
+
 
 def user_jobs_root(user_id: str) -> Path:
     p = DATA_DIR / "users" / user_id / "jobs"
@@ -350,7 +292,7 @@ def home():
     if not index_path.exists():
         return HTMLResponse("<h1>Missing app/templates/index.html</h1>", status_code=500)
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
-from fastapi.responses import HTMLResponse
+
 
 def serve_template_file(filename: str) -> HTMLResponse:
     path = TEMPLATES_DIR / filename
@@ -358,37 +300,112 @@ def serve_template_file(filename: str) -> HTMLResponse:
         return HTMLResponse(f"<h1>Missing {filename}</h1>", status_code=404)
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
+
 @app.get("/terms", response_class=HTMLResponse)
 def terms_page():
     return serve_template_file("terms.html")
+
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page():
     return serve_template_file("privacy.html")
 
+
 @app.get("/refunds", response_class=HTMLResponse)
 def refunds_page():
     return serve_template_file("refunds.html")
 
+
+@app.get("/billing", response_class=HTMLResponse)
+def billing_page():
+    # optional, only works if you create billing.html
+    return serve_template_file("billing.html")
+
 # =========================================================
-# Billing helper endpoint (fixes your 404)
+# Billing plans endpoint (ONE ONLY)
 # =========================================================
 @app.get("/api/billing/plans")
 def billing_plans():
-    return {
-        "plans": [
-            {"key": "free", "name": "Free", "credits": PLANS["free"]["monthly_credits"], "price_monthly": 0},
-            {"key": "basic", "name": "Basic", "credits": PLANS["basic"]["monthly_credits"], "price_monthly": PLANS["basic"]["price_monthly"], "price_id": os.getenv("STRIPE_PRICE_BASIC", "").strip()},
-            {"key": "plus", "name": "Plus", "credits": PLANS["plus"]["monthly_credits"], "price_monthly": PLANS["plus"]["price_monthly"], "price_id": os.getenv("STRIPE_PRICE_PLUS", "").strip()},
-            {"key": "pro", "name": "Pro", "credits": PLANS["pro"]["monthly_credits"], "price_monthly": PLANS["pro"]["price_monthly"], "price_id": os.getenv("STRIPE_PRICE_PRO", "").strip()},
-        ]
-    }
+    """
+    Returns plan data (with aliases) so the frontend never shows undefined.
+    Also includes stripe_ready to help you debug env vars on Render.
+    """
+    RECURRING_DISCOUNT_PCT = 10  # if you ever add “discount” again
+
+    ordered = ["free", "basic", "plus", "pro"]
+    plans_out = []
+
+    for key in ordered:
+        p = PLANS.get(key)
+        if not p:
+            continue
+
+        credits = int(p.get("monthly_credits", 0))
+        monthly_price = float(p.get("price_monthly", 0))
+        recurring_price = round(monthly_price * (1 - (RECURRING_DISCOUNT_PCT / 100.0)), 2)
+
+        stripe_price_id = ""
+        if key == "basic":
+            stripe_price_id = STRIPE_PRICE_BASIC
+        elif key == "plus":
+            stripe_price_id = STRIPE_PRICE_PLUS
+        elif key == "pro":
+            stripe_price_id = STRIPE_PRICE_PRO
+
+        plan_obj = {
+            "key": key,
+            "id": key,
+            "tier": key,
+            "name": key.capitalize(),
+
+            "monthly_credits": credits,
+            "monthlyCredits": credits,
+            "credits": credits,
+            "credits_per_month": credits,
+            "creditsPerMonth": credits,
+
+            "price_monthly": monthly_price,
+            "priceMonthly": monthly_price,
+            "monthly_price": monthly_price,
+            "monthlyPrice": monthly_price,
+
+            "recurring_price_monthly": recurring_price,
+            "recurringPriceMonthly": recurring_price,
+            "recurring_monthly_price": recurring_price,
+            "recurringMonthlyPrice": recurring_price,
+            "discount_pct": RECURRING_DISCOUNT_PCT,
+            "discountPct": RECURRING_DISCOUNT_PCT,
+
+            "recurring": {
+                "price_monthly": recurring_price,
+                "priceMonthly": recurring_price,
+                "discount_pct": RECURRING_DISCOUNT_PCT,
+                "discountPct": RECURRING_DISCOUNT_PCT,
+            },
+
+            "stripe_price_id": stripe_price_id,
+            "stripePriceId": stripe_price_id,
+            "price_id": stripe_price_id,
+            "priceId": stripe_price_id,
+        }
+        plans_out.append(plan_obj)
+
+    stripe_ready = bool(stripe.api_key) and all(
+        (pl.get("stripe_price_id") or "") for pl in plans_out if pl["key"] != "free"
+    )
+
+    return {"ok": True, "stripe_ready": stripe_ready, "plans": plans_out}
 
 # =========================================================
-# Auth
+# Auth endpoints
 # =========================================================
 @app.post("/api/auth/signup")
-def signup(response: Response, email: str = Form(...), username: str = Form(...), password: str = Form(...)):
+def signup(
+    response: Response,
+    email: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+):
     email = (email or "").strip().lower()
     username = (username or "").strip()
     password = password or ""
@@ -426,8 +443,17 @@ def signup(response: Response, email: str = Form(...), username: str = Form(...)
         conn.close()
 
     sess = _create_session(user_id)
-    response.set_cookie(COOKIE_NAME, sess["token"], httponly=True, samesite="lax", secure=False, max_age=14 * 24 * 3600, path="/")
+    response.set_cookie(
+        COOKIE_NAME,
+        sess["token"],
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=14 * 24 * 3600,
+        path="/",
+    )
     return {"ok": True, "email": email, "username": username, "credits": credits, "plan": plan}
+
 
 @app.post("/api/auth/login")
 def login(response: Response, username: str = Form(...), password: str = Form(...)):
@@ -436,7 +462,10 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
 
     conn = db_conn()
     try:
-        u = conn.execute("SELECT * FROM users WHERE username = ? OR email = ?", (username, username.lower())).fetchone()
+        u = conn.execute(
+            "SELECT * FROM users WHERE username = ? OR email = ?",
+            (username, username.lower()),
+        ).fetchone()
     finally:
         conn.close()
 
@@ -444,14 +473,41 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
         raise HTTPException(status_code=401, detail="Invalid username/email or password")
 
     u2 = _maybe_reset_credits(u["id"])
-    sess = _create_session(u["id"])
-    response.set_cookie(COOKIE_NAME, sess["token"], httponly=True, samesite="lax", secure=False, max_age=14 * 24 * 3600, path="/")
 
-    return {"ok": True, "email": u2["email"], "username": u2["username"], "credits": int(u2["credits"]), "plan": u2["plan"], "billing": u2["billing"], "next_reset_at": u2["next_reset_at"]}
+    sess = _create_session(u["id"])
+    response.set_cookie(
+        COOKIE_NAME,
+        sess["token"],
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=14 * 24 * 3600,
+        path="/",
+    )
+
+    return {
+        "ok": True,
+        "email": u2["email"],
+        "username": u2["username"],
+        "credits": int(u2["credits"]),
+        "plan": u2["plan"],
+        "billing": u2["billing"],
+        "next_reset_at": u2["next_reset_at"],
+    }
+
 
 @app.get("/api/auth/me")
 def me(user=Depends(get_current_user)):
-    return {"ok": True, "email": user["email"], "username": user["username"], "credits": int(user["credits"]), "plan": user["plan"], "billing": user["billing"], "next_reset_at": user["next_reset_at"]}
+    return {
+        "ok": True,
+        "email": user["email"],
+        "username": user["username"],
+        "credits": int(user["credits"]),
+        "plan": user["plan"],
+        "billing": user["billing"],
+        "next_reset_at": user["next_reset_at"],
+    }
+
 
 @app.post("/api/auth/logout")
 def logout(request: Request, response: Response):
@@ -462,12 +518,18 @@ def logout(request: Request, response: Response):
     return {"ok": True}
 
 # =========================================================
-# Stripe endpoints
+# Stripe endpoints (Checkout + Portal + Webhook)
 # =========================================================
 @app.post("/api/stripe/create-checkout-session")
-async def stripe_create_checkout_session(request: Request, user=Depends(get_current_user)):
+async def stripe_create_checkout_session(
+    request: Request,
+    user=Depends(get_current_user),
+):
+    """
+    POST JSON: { "price_id": "price_..." }
+    """
     if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe secret key not set")
+        raise HTTPException(status_code=500, detail="Stripe secret key not set (STRIPE_SECRET_KEY)")
 
     data = await request.json()
     price_id = str(data.get("price_id", "")).strip()
@@ -482,7 +544,10 @@ async def stripe_create_checkout_session(request: Request, user=Depends(get_curr
 
         customer_id = u["stripe_customer_id"]
         if not customer_id:
-            customer = stripe.Customer.create(email=u["email"], metadata={"user_id": u["id"], "app": "jus-clip-it"})
+            customer = stripe.Customer.create(
+                email=u["email"],
+                metadata={"user_id": u["id"], "app": "jus-clip-it"},
+            )
             customer_id = customer["id"]
             conn.execute("UPDATE users SET stripe_customer_id=? WHERE id=?", (customer_id, u["id"]))
             conn.commit()
@@ -496,14 +561,16 @@ async def stripe_create_checkout_session(request: Request, user=Depends(get_curr
             allow_promotion_codes=True,
             client_reference_id=u["id"],
         )
+
         return {"url": session["url"]}
     finally:
         conn.close()
 
+
 @app.post("/api/stripe/create-portal-session")
 async def stripe_create_portal_session(user=Depends(get_current_user)):
     if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe secret key not set")
+        raise HTTPException(status_code=500, detail="Stripe secret key not set (STRIPE_SECRET_KEY)")
 
     conn = db_conn()
     try:
@@ -511,17 +578,24 @@ async def stripe_create_portal_session(user=Depends(get_current_user)):
         if not u or not u["stripe_customer_id"]:
             raise HTTPException(status_code=400, detail="No Stripe customer yet")
 
-        portal = stripe.billing_portal.Session.create(customer=u["stripe_customer_id"], return_url=f"{APP_BASE_URL}/")
+        portal = stripe.billing_portal.Session.create(
+            customer=u["stripe_customer_id"],
+            return_url=f"{APP_BASE_URL}/",
+        )
         return {"url": portal["url"]}
     finally:
         conn.close()
 
-# =========================================================
-# Stripe webhook (ONLY ONE)
-# =========================================================
+
 @app.post("/api/stripe/webhook")
 async def stripe_webhook(request: Request):
+    """
+    Local testing:
+      stripe listen --forward-to http://127.0.0.1:8000/api/stripe/webhook
+    Put the printed whsec_... into STRIPE_WEBHOOK_SECRET.
+    """
     if not STRIPE_WEBHOOK_SECRET:
+        # returning 500 will cause Stripe CLI retries forever; this makes it obvious in logs
         return JSONResponse({"error": "Missing STRIPE_WEBHOOK_SECRET"}, status_code=500)
 
     payload = await request.body()
@@ -538,8 +612,10 @@ async def stripe_webhook(request: Request):
     etype = event.get("type", "unknown")
     eid = event.get("id", "no_id")
     obj = (event.get("data") or {}).get("object") or {}
+
     print(f"✅ Stripe event received: {etype} ({eid})")
 
+    # Never crash webhook: Stripe will retry if we 500.
     try:
         conn = db_conn()
         try:
@@ -547,9 +623,15 @@ async def stripe_webhook(request: Request):
                 customer_id = obj.get("customer")
                 sub_id = obj.get("subscription")
                 if customer_id:
-                    u = conn.execute("SELECT * FROM users WHERE stripe_customer_id=?", (customer_id,)).fetchone()
+                    u = conn.execute(
+                        "SELECT * FROM users WHERE stripe_customer_id=?",
+                        (customer_id,),
+                    ).fetchone()
                     if u and sub_id:
-                        conn.execute("UPDATE users SET stripe_subscription_id=?, billing='stripe' WHERE id=?", (sub_id, u["id"]))
+                        conn.execute(
+                            "UPDATE users SET stripe_subscription_id=?, billing='stripe' WHERE id=?",
+                            (sub_id, u["id"]),
+                        )
                         conn.commit()
 
             elif etype in ("customer.subscription.created", "customer.subscription.updated"):
@@ -562,32 +644,48 @@ async def stripe_webhook(request: Request):
                     price_id = items[0]["price"].get("id")
 
                 if customer_id:
-                    u = conn.execute("SELECT * FROM users WHERE stripe_customer_id=?", (customer_id,)).fetchone()
+                    u = conn.execute(
+                        "SELECT * FROM users WHERE stripe_customer_id=?",
+                        (customer_id,),
+                    ).fetchone()
+
                     if u and status == "active" and price_id in STRIPE_PRICE_TO_PLAN:
                         plan = STRIPE_PRICE_TO_PLAN[price_id]
                         monthly = int(PLANS[plan]["monthly_credits"])
                         now = datetime.utcnow()
                         next_reset_at = (now + timedelta(days=RESET_DAYS)).isoformat()
-                        conn.execute("UPDATE users SET plan=?, billing='stripe', credits=?, next_reset_at=? WHERE id=?", (plan, monthly, next_reset_at, u["id"]))
+
+                        conn.execute(
+                            "UPDATE users SET plan=?, billing='stripe', credits=?, next_reset_at=? WHERE id=?",
+                            (plan, monthly, next_reset_at, u["id"]),
+                        )
                         conn.commit()
 
             elif etype == "customer.subscription.deleted":
                 customer_id = obj.get("customer")
                 if customer_id:
-                    u = conn.execute("SELECT * FROM users WHERE stripe_customer_id=?", (customer_id,)).fetchone()
+                    u = conn.execute(
+                        "SELECT * FROM users WHERE stripe_customer_id=?",
+                        (customer_id,),
+                    ).fetchone()
                     if u:
                         now = datetime.utcnow()
                         next_reset_at = (now + timedelta(days=RESET_DAYS)).isoformat()
                         free_credits = int(PLANS["free"]["monthly_credits"])
-                        conn.execute("UPDATE users SET plan='free', billing='none', credits=?, next_reset_at=? WHERE id=?", (free_credits, next_reset_at, u["id"]))
+
+                        conn.execute(
+                            "UPDATE users SET plan='free', billing='none', credits=?, next_reset_at=? WHERE id=?",
+                            (free_credits, next_reset_at, u["id"]),
+                        )
                         conn.commit()
         finally:
             conn.close()
 
     except Exception as e:
-        print("🔥 Webhook crashed:", etype, eid, repr(e))
+        print("🔥 Webhook handler crashed processing event:", etype, eid)
+        print("🔥 ERROR:", repr(e))
         traceback.print_exc()
-        # return 200 so Stripe doesn’t retry forever while you debug
+        # IMPORTANT: return 200 so Stripe doesn't retry forever while you debug
         return JSONResponse({"received": True, "processing_error": str(e)}, status_code=200)
 
     return JSONResponse({"received": True}, status_code=200)
@@ -598,6 +696,7 @@ async def stripe_webhook(request: Request):
 def range_file_response(path: Path, request: Request, content_type: str = "video/mp4"):
     file_size = path.stat().st_size
     range_header = request.headers.get("range")
+
     if not range_header:
         return FileResponse(str(path), media_type=content_type)
 
@@ -631,6 +730,7 @@ def range_file_response(path: Path, request: Request, content_type: str = "video
         "Accept-Ranges": "bytes",
         "Content-Length": str(chunk_size),
     }
+
     return StreamingResponse(iterfile(), status_code=206, media_type=content_type, headers=headers)
 
 # =========================================================
@@ -651,6 +751,8 @@ async def api_create_job(
     crop_y: float = Form(50.0),
     crop_w: float = Form(56.0),
     crop_h: float = Form(100.0),
+
+    # optional follow tuning (only used if engine supports it)
     follow_sample_fps: int = Form(10),
     follow_smooth: float = Form(0.18),
     follow_hold_frames: int = Form(24),
@@ -686,12 +788,14 @@ async def api_create_job(
     crop_w = clamp(crop_w, 10, 100)
     crop_h = clamp(crop_h, 10, 100)
 
+    # Charge credits
     conn = db_conn()
     try:
         row = conn.execute("SELECT credits FROM users WHERE id = ?", (user["id"],)).fetchone()
         credits = int(row["credits"]) if row else 0
         if credits < JOB_COST:
             raise HTTPException(status_code=402, detail="No credits left")
+
         conn.execute("UPDATE users SET credits = credits - ? WHERE id = ?", (JOB_COST, user["id"]))
         conn.commit()
     finally:
@@ -730,6 +834,7 @@ async def api_create_job(
     try:
         create_job(**engine_kwargs)
     except TypeError:
+        # engine doesn't accept follow_* yet
         for k in [
             "follow_sample_fps",
             "follow_smooth",
@@ -750,6 +855,7 @@ async def api_create_job(
 
     return {"job_id": job_id, "credits": new_credits}
 
+
 @app.get("/api/jobs/{job_id}/clips")
 def api_list_clips(job_id: str, user=Depends(get_current_user)):
     from app.engine import list_clips  # noqa
@@ -758,6 +864,7 @@ def api_list_clips(job_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Job not found")
     return {"clips": list_clips(job_dir)}
 
+
 @app.get("/api/jobs/{job_id}/files/{filename}")
 def api_job_file(job_id: str, filename: str, user=Depends(get_current_user)):
     job_dir = user_jobs_root(user["id"]) / job_id
@@ -765,6 +872,7 @@ def api_job_file(job_id: str, filename: str, user=Depends(get_current_user)):
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(p))
+
 
 @app.get("/api/jobs/{job_id}/clips/{idx}/video")
 def api_clip_video(job_id: str, idx: int, request: Request, user=Depends(get_current_user)):
@@ -775,6 +883,7 @@ def api_clip_video(job_id: str, idx: int, request: Request, user=Depends(get_cur
     if not p.exists():
         raise HTTPException(status_code=404, detail="Clip not found")
     return range_file_response(p, request, content_type="video/mp4")
+
 
 @app.get("/api/jobs/{job_id}/clips/{idx}/words")
 def api_clip_words(job_id: str, idx: int, user=Depends(get_current_user)):
@@ -793,6 +902,7 @@ def api_clip_words(job_id: str, idx: int, user=Depends(get_current_user)):
 
     return json.loads(words_json.read_text(encoding="utf-8"))
 
+
 @app.get("/api/jobs/{job_id}/clips/{idx}/captions.srt")
 def api_clip_srt(job_id: str, idx: int, user=Depends(get_current_user)):
     from app.engine import get_clip_paths  # noqa
@@ -805,6 +915,7 @@ def api_clip_srt(job_id: str, idx: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="SRT not found")
     return FileResponse(str(srt), media_type="text/plain")
 
+
 @app.get("/api/jobs/{job_id}/clips/{idx}/captions.json")
 def api_clip_words_json(job_id: str, idx: int, user=Depends(get_current_user)):
     from app.engine import get_clip_paths  # noqa
@@ -815,11 +926,19 @@ def api_clip_words_json(job_id: str, idx: int, user=Depends(get_current_user)):
         _ = api_clip_words(job_id, idx, user=user)
     return FileResponse(str(words_json), media_type="application/json")
 
+
 @app.post("/api/jobs/{job_id}/clips/{idx}/captions")
-def api_save_captions(job_id: str, idx: int, srt_text: str = Form(""), user=Depends(get_current_user)):
+def api_save_captions(
+    job_id: str,
+    idx: int,
+    srt_text: str = Form(""),
+    user=Depends(get_current_user),
+):
     job_dir = user_jobs_root(user["id"]) / job_id
     srt = job_dir / f"clip_{idx}.srt"
+
     if not (job_dir / f"clip_{idx}.mp4").exists():
         raise HTTPException(status_code=404, detail="Clip not found")
+
     srt.write_text(srt_text or "", encoding="utf-8")
     return {"ok": True}

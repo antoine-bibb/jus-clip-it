@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Billing — Jus Clip It</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <style>
+    .wrap{max-width:980px;margin:0 auto;padding:26px 16px}
+    .hero{margin-top:10px;padding:18px 16px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.03)}
+    .hero h1{margin:0 0 6px 0;font-size:26px}
+    .hero p{margin:0;opacity:.85;line-height:1.35}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+    @media (max-width: 900px){.grid{grid-template-columns:1fr}}
+    .card{padding:14px;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(255,255,255,.04)}
+    .card h3{margin:0 0 4px 0}
+    .muted{opacity:.75;font-size:13px}
+    .price{font-size:22px;margin:10px 0 10px 0}
+    .btn{width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;cursor:pointer}
+    .btn.primary{background:rgba(255,255,255,.16)}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px}
+    .status{margin-top:10px;min-height:18px;opacity:.9}
+    a{color:inherit;opacity:.9}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand img{height:28px;width:auto;opacity:.95}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <img src="/static/logo.png" alt="Jus Clip It">
+        <strong>Jus Clip It</strong>
+      </div>
+      <div class="row" style="margin:0;">
+        <a href="/">Back</a>
+      </div>
+    </div>
+
+    <div class="hero">
+      <h1>Billing & Plans</h1>
+      <p>
+        Jus Clip It turns long videos into short, shareable clips automatically.
+        Subscribe for more monthly credits. Credits reset every 30 days to your plan amount.
+      </p>
+      <div id="billingStatus" class="status"></div>
+    </div>
+
+    <div id="planGrid" class="grid"></div>
+
+    <div style="margin-top:18px; opacity:.75; font-size:13px;">
+      Questions? Contact: <a href="mailto:support@jusclipit.net">support@jusclipit.net</a>
+      · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a>
+    </div>
+  </div>
+
+<script>
+(async function(){
+  const statusEl = document.getElementById("billingStatus");
+  const gridEl = document.getElementById("planGrid");
+
+  function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+  async function loadPlans(){
+    setStatus("Loading plans...");
+    const res = await fetch("/api/billing/plans");
+    const data = await res.json();
+
+    if (!data.ok) {
+      setStatus("Could not load plans.");
+      return;
+    }
+
+    if (!data.stripe_ready) {
+      setStatus("Stripe is not fully configured (missing price IDs or secret key). Check your Render env vars.");
+    } else {
+      setStatus("");
+    }
+
+    const plans = data.plans || [];
+    gridEl.innerHTML = "";
+
+    plans.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <h3>${p.name}</h3>
+        <div class="muted">${p.credits} credits / month</div>
+        <div class="price">$${p.price_monthly}/mo</div>
+        <div class="muted" style="margin-bottom:10px;">Renews monthly until canceled.</div>
+        <button class="btn primary" ${p.stripe_price_id ? "" : "disabled"} data-price="${p.stripe_price_id}">
+          ${p.stripe_price_id ? "Subscribe" : "Missing Stripe Price ID"}
+        </button>
+      `;
+      gridEl.appendChild(card);
+    });
+
+    gridEl.querySelectorAll("button[data-price]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const priceId = btn.getAttribute("data-price");
+        if (!priceId) return;
+
+        setStatus("Opening Stripe Checkout...");
+        const r = await fetch("/api/stripe/create-checkout-session", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ price_id: priceId })
+        });
+        const j = await r.json();
+        if (j.url) window.location.href = j.url;
+        else setStatus(j.detail || "Could not start checkout.");
+      });
+    });
+  }
+
+  try { await loadPlans(); }
+  catch(e){ console.error(e); setStatus("Error loading plans. Check console."); }
+})();
+</script>
+</body>
+</html>
