@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     app_name: str = 'JusClipIt API'
     environment: str = 'development'
-    database_url: str = 'postgresql+psycopg://postgres:postgres@localhost:5432/jusclipit'
+    database_url: str = "sqlite+aiosqlite:///./jusclipit.db"
     redis_url: str = 'redis://localhost:6379/0'
     s3_bucket: str = 'jusclipit-videos'
     s3_region: str = 'us-east-1'
