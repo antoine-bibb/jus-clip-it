@@ -5,6 +5,7 @@ stripe
 jinja2
 python-multipart
 sqlalchemy
+aiosqlite
 psycopg[binary]
 pydantic-settings
 celery
