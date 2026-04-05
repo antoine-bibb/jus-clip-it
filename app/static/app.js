@@ -29,6 +29,10 @@ const goBtn = el("go");
 const statusEl = el("status");
 const clipsEl = el("clips");
 
+const uploadProgressEl = el("uploadProgress");
+const progressFillEl = el("progressFill");
+const progressTextEl = el("progressText");
+
 const pv = el("pv");
 const cap = el("cap");
 
@@ -40,6 +44,8 @@ const strokeEl = el("stroke");
 const strokeWidthEl = el("strokeWidth");
 const posXEl = el("posX");
 const posYEl = el("posY");
+
+const fontFamilyEl = el("fontFamily");
 
 const dlSrt = el("dlSrt");
 const dlJson = el("dlJson");
@@ -70,6 +76,11 @@ const cropHEl = el("cropH");
 /* Auth UI */
 const authBtn = el("authBtn");
 const creditBalanceEl = el("creditBalance");
+const accountDropdown = el("accountDropdown");
+const dropdownUser = el("dropdownUser");
+const dropdownAdmin = el("dropdownAdmin");
+const adminLink = el("adminLink");
+const logoutBtn = el("logoutBtn");
 
 const authModal = el("authModal");
 const authCloseBtn = el("authCloseBtn");
@@ -87,7 +98,6 @@ const signupEmail = el("signupEmail");
 const signupUsername = el("signupUsername");
 const signupPassword = el("signupPassword");
 
-const logoutBtn = el("logoutBtn");
 const buyCreditsBtn = el("buyCreditsBtn"); // “Manage Plan” button in account modal
 
 /* Billing modal */
@@ -108,7 +118,7 @@ const billRecurringBtn = el("billRecurringBtn");
 let currentJob = null;
 let currentIdx = null;
 let words = [];
-let me = null; // {email, username, credits, plan, billing, next_reset_at}
+let me = null; // {email, username, credits, plan, billing, next_reset_at, is_admin}
 
 let authWaitResolve = null;
 
@@ -143,8 +153,23 @@ function setCredits(n) {
 
 function setAuthLabel() {
   if (!authBtn) return;
-  if (me?.username) authBtn.textContent = `@${me.username} (Account)`;
-  else authBtn.textContent = "Login / Create";
+  if (me?.username) {
+    authBtn.textContent = `@${me.username} (Account)`;
+    if (accountDropdown) accountDropdown.style.display = "none";
+    if (dropdownUser) dropdownUser.textContent = `@${me.username}`;
+    if (dropdownAdmin && adminLink) {
+      if (me.is_admin) {
+        dropdownAdmin.style.display = "inline";
+        adminLink.style.display = "block";
+      } else {
+        dropdownAdmin.style.display = "none";
+        adminLink.style.display = "none";
+      }
+    }
+  } else {
+    authBtn.textContent = "Login / Create";
+    if (accountDropdown) accountDropdown.style.display = "none";
+  }
 }
 
 function showAuthError(msg) {
@@ -338,9 +363,13 @@ authModal?.addEventListener("mousedown", (e) => {
 authBtn?.addEventListener("click", async () => {
   me = await apiMe();
   if (me?.username) {
+    // Toggle dropdown menu
     setCredits(me.credits);
     setAuthLabel();
-    openAuthModal("login");
+    if (accountDropdown) {
+      const isVisible = accountDropdown.style.display !== "none";
+      accountDropdown.style.display = isVisible ? "none" : "block";
+    }
   } else {
     openAuthModal("login");
   }
@@ -351,8 +380,8 @@ logoutBtn?.addEventListener("click", async () => {
   me = null;
   setCredits(0);
   setAuthLabel();
-  closeAuthModal();
   setStatus("Logged out.");
+  if (accountDropdown) accountDropdown.style.display = "none";
 });
 
 /* Login submit */
@@ -605,6 +634,7 @@ function applyStyle() {
   if (!cap) return;
 
   cap.style.fontSize = `${clamp(fontSizeEl?.value ?? 35, 18, 120)}px`;
+  cap.style.fontFamily = fontFamilyEl?.value || "Arial, sans-serif";
   cap.style.left = `${clamp(posXEl?.value ?? 50, 0, 100)}%`;
   cap.style.top = `${clamp(posYEl?.value ?? 78, 0, 100)}%`;
   cap.style.color = colorEl?.value || "#ffffff";
@@ -692,7 +722,7 @@ function clipRow(jobId, c) {
     <div class="clip">
       ${thumbTag}
       <div class="clipMeta">
-        <div class="title">Clip #${c.index}</div>
+        <div class="title">${c.name || `Clip #${c.index + 1}`}</div>
         <div class="sub">${Math.round(c.end - c.start)}s</div>
       </div>
       <div class="clipBtns">
@@ -725,7 +755,8 @@ async function refreshClips(jobId) {
   [...(clipsEl?.querySelectorAll(".editBtn") || [])].forEach((btn) => {
     btn.addEventListener("click", async () => {
       const idx = Number(btn.dataset.idx);
-      await openSrtEditor(jobId, idx);
+      // Open caption editor page
+      window.open(`/editor?job=${jobId}&clip=${idx}`, '_blank');
     });
   });
 }
@@ -935,9 +966,14 @@ goBtn?.addEventListener("click", async () => {
 
   setStatus("Uploading...");
 
+  // Show progress bar
+  if (uploadProgressEl) uploadProgressEl.style.display = "block";
+  if (progressFillEl) progressFillEl.style.width = "0%";
+  if (progressTextEl) progressTextEl.textContent = "Uploading... 0%";
+
   const form = new FormData();
   form.append("video", f);
-  form.append("clip_len", clipLenEl?.value || "25");
+  form.append("clip_len", clipLenEl?.value || "60");
   form.append("max_clips", maxClipsEl?.value || "8");
 
   // crop + output
@@ -955,33 +991,58 @@ goBtn?.addEventListener("click", async () => {
   form.append("crop_w", String(cropWEl?.value ?? 56));
   form.append("crop_h", String(cropHEl?.value ?? 100));
 
-  const r = await fetch("/api/jobs", { method: "POST", credentials: "include", body: form });
-  const data = await r.json().catch(() => ({}));
+  // Use XMLHttpRequest for upload progress tracking
+  const xhr = new XMLHttpRequest();
 
-  if (!r.ok) {
-    alert(data.detail || "Failed");
+  xhr.upload.addEventListener("progress", (e) => {
+    if (e.lengthComputable) {
+      const percentComplete = Math.round((e.loaded / e.total) * 100);
+      if (progressFillEl) progressFillEl.style.width = `${percentComplete}%`;
+      if (progressTextEl) progressTextEl.textContent = `Uploading... ${percentComplete}%`;
+    }
+  });
+
+  xhr.addEventListener("load", async () => {
+    // Hide progress bar
+    if (uploadProgressEl) uploadProgressEl.style.display = "none";
+
+    if (xhr.status >= 200 && xhr.status < 300) {
+      const data = JSON.parse(xhr.responseText || "{}");
+
+      currentJob = data.job_id;
+      if (typeof data.credits !== "undefined") {
+        setCredits(data.credits);
+        if (me) me.credits = data.credits;
+      }
+
+      setStatus(`Job done. Job ID: ${currentJob}`);
+      await refreshClips(currentJob);
+
+      const firstBtn = clipsEl?.querySelector(".pvBtn");
+      if (firstBtn) {
+        const idx = Number(firstBtn.dataset.idx);
+        await previewClip(currentJob, idx);
+      }
+    } else {
+      const data = JSON.parse(xhr.responseText || "{}");
+      alert(data.detail || "Failed");
+    }
+
     goBtn.disabled = false;
     goBtn.textContent = old;
-    return;
-  }
+  });
 
-  currentJob = data.job_id;
-  if (typeof data.credits !== "undefined") {
-    setCredits(data.credits);
-    if (me) me.credits = data.credits;
-  }
+  xhr.addEventListener("error", () => {
+    // Hide progress bar
+    if (uploadProgressEl) uploadProgressEl.style.display = "none";
+    alert("Upload failed");
+    goBtn.disabled = false;
+    goBtn.textContent = old;
+  });
 
-  setStatus(`Job done. Job ID: ${currentJob}`);
-  await refreshClips(currentJob);
-
-  const firstBtn = clipsEl?.querySelector(".pvBtn");
-  if (firstBtn) {
-    const idx = Number(firstBtn.dataset.idx);
-    await previewClip(currentJob, idx);
-  }
-
-  goBtn.disabled = false;
-  goBtn.textContent = old;
+  xhr.open("POST", "/api/jobs");
+  xhr.withCredentials = true;
+  xhr.send(form);
 });
 
 /* ----------------------------
@@ -989,12 +1050,20 @@ goBtn?.addEventListener("click", async () => {
 ---------------------------- */
 pv?.addEventListener("timeupdate", () => renderKaraoke(pv.currentTime));
 
-[fontSizeEl, wordWindowEl, strokeWidthEl, posXEl, posYEl].forEach((x) => {
+[fontSizeEl, wordWindowEl, strokeWidthEl, posXEl, posYEl, fontFamilyEl].forEach((x) => {
   if (!x) return;
   x.addEventListener("input", () => {
     applyStyle();
     renderKaraoke(pv?.currentTime || 0);
   });
+});
+
+/* Close dropdown when clicking outside */
+document.addEventListener("click", (e) => {
+  const container = document.querySelector(".account-menu-container");
+  if (container && !container.contains(e.target) && accountDropdown) {
+    accountDropdown.style.display = "none";
+  }
 });
 
 /* ----------------------------

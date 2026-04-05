@@ -1,0 +1,272 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Panel - Jus Clip It</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="shortcut icon" href="/static/favicon.png">
+</head>
+<body>
+
+<header class="navbar">
+  <div class="nav-inner">
+    <div class="nav-left">
+      <span class="app-title">Jus Clip It</span>
+    </div>
+
+    <div class="nav-center">
+      <h2>⚙️ Admin Panel</h2>
+    </div>
+
+    <div class="nav-right">
+      <button id="backBtn" class="nav-btn">← Back to Home</button>
+    </div>
+  </div>
+</header>
+
+<div class="admin-container">
+  <div id="adminStatus" class="admin-status"></div>
+  
+  <div class="admin-section">
+    <h3>Make User Admin</h3>
+    <p class="section-desc">Grant unlimited uploads to a user</p>
+    <div class="form-group">
+      <input type="email" id="adminEmail" placeholder="user@example.com" class="admin-input" />
+      <button id="makeAdminBtn" class="admin-btn">Grant Admin Access</button>
+    </div>
+  </div>
+
+  <div class="admin-section">
+    <h3>User Management</h3>
+    <p class="section-desc">View and manage all users</p>
+    <button id="listUsersBtn" class="admin-btn">Load All Users</button>
+    <div id="usersList" style="margin-top: 20px;"></div>
+  </div>
+
+  <div class="admin-section">
+    <h3>System Stats</h3>
+    <p class="section-desc">View system usage statistics</p>
+    <div id="systemStats" style="margin-top: 12px;">
+      <p>Click to load stats...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const el = (id) => document.getElementById(id);
+
+let isAdmin = false;
+
+async function checkAdmin() {
+  try {
+    const response = await fetch('/api/auth/me', { credentials: 'include' });
+    const user = await response.json();
+    isAdmin = user.is_admin === true;
+    
+    if (!isAdmin) {
+      el('adminStatus').innerHTML = '<div class="error-message">❌ You do not have admin access</div>';
+      document.querySelectorAll('.admin-section').forEach(s => s.style.opacity = '0.3');
+      document.querySelectorAll('.admin-btn, .admin-input').forEach(btn => btn.disabled = true);
+    }
+  } catch (err) {
+    console.error('Error checking admin status:', err);
+  }
+}
+
+el('makeAdminBtn')?.addEventListener('click', async () => {
+  const email = el('adminEmail')?.value?.trim();
+  if (!email) {
+    el('adminStatus').innerHTML = '<div class="error-message">⚠️ Enter an email address</div>';
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/admin/make-admin', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      el('adminStatus').innerHTML = `<div class="success-message">✅ ${data.detail || 'Success'}</div>`;
+      el('adminEmail').value = '';
+    } else {
+      el('adminStatus').innerHTML = `<div class="error-message">❌ ${data.detail || 'Error'}</div>`;
+    }
+  } catch (err) {
+    el('adminStatus').innerHTML = '<div class="error-message">❌ Network error</div>';
+  }
+});
+
+el('listUsersBtn')?.addEventListener('click', async () => {
+  try {
+    const response = await fetch('/api/admin/users', { credentials: 'include' });
+    if (!response.ok) {
+      el('usersList').innerHTML = '<div class="error-message">❌ Failed to load users</div>';
+      return;
+    }
+    
+    const data = await response.json();
+    const users = data.users || [];
+    
+    if (users.length === 0) {
+      el('usersList').innerHTML = '<p>No users found</p>';
+      return;
+    }
+    
+    const html = users.map(user => `
+      <div class="user-item">
+        <div class="user-info">
+          <strong>${user.email}</strong>
+          ${user.is_admin ? '<span class="admin-tag">ADMIN</span>' : ''}
+        </div>
+        <div class="user-stats">
+          <span>Uploads: ${user.clips_used_total || 0}</span>
+          <span>Credits: ${user.credits || 0}</span>
+        </div>
+      </div>
+    `).join('');
+    
+    el('usersList').innerHTML = html;
+  } catch (err) {
+    el('usersList').innerHTML = '<div class="error-message">❌ Error loading users</div>';
+  }
+});
+
+el('backBtn')?.addEventListener('click', () => {
+  window.location.href = '/';
+});
+
+checkAdmin();
+</script>
+
+<style>
+.admin-container {
+  max-width: 700px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+.admin-status {
+  margin-bottom: 20px;
+}
+
+.success-message, .error-message {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.success-message {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.error-message {
+  background: rgba(255, 42, 42, 0.2);
+  color: #ff2a2a;
+  border: 1px solid rgba(255, 42, 42, 0.3);
+}
+
+.admin-section {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.admin-section h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  color: #fff;
+}
+
+.section-desc {
+  font-size: 13px;
+  opacity: 0.7;
+  margin: 0 0 16px 0;
+}
+
+.form-group {
+  display: flex;
+  gap: 12px;
+}
+
+.admin-input {
+  flex: 1;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #fff;
+  font-family: inherit;
+}
+
+.admin-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.admin-btn {
+  padding: 10px 16px;
+  background: #ff2a2a;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.admin-btn:hover:not(:disabled) {
+  background: #ff6b6b;
+}
+
+.admin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.user-item {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-tag {
+  font-size: 11px;
+  background: #ff2a2a;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.user-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+</style>
+
+</body>
+</html>

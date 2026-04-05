@@ -26,6 +26,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     membership_tier: Mapped[MembershipTier] = mapped_column(SqlEnum(MembershipTier), default=MembershipTier.FREE)
+    is_admin: Mapped[bool] = mapped_column(default=False)
     clips_used_total: Mapped[int] = mapped_column(Integer, default=0)
     clips_used_period: Mapped[int] = mapped_column(Integer, default=0)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -19,12 +19,12 @@ if not has_col("users", "plan"):
 else:
     print("ℹ users.plan already exists")
 
-if not has_col("users", "credits_reset_at"):
-    cur.execute("ALTER TABLE users ADD COLUMN credits_reset_at TEXT")
-    print("✅ added users.credits_reset_at")
+if not has_col("users", "is_admin"):
+    cur.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+    print("✅ added users.is_admin")
     changed = True
 else:
-    print("ℹ users.credits_reset_at already exists")
+    print("ℹ users.is_admin already exists")
 
 conn.commit()
 conn.close()

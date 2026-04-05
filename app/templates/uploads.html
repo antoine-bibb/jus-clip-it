@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>My Uploads - Jus Clip It</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="shortcut icon" href="/static/favicon.png">
+</head>
+<body>
+
+<header class="navbar">
+  <div class="nav-inner">
+    <div class="nav-left">
+      <span class="app-title">Jus Clip It</span>
+    </div>
+
+    <div class="nav-center">
+      <h2>My Uploads</h2>
+    </div>
+
+    <div class="nav-right">
+      <div class="credits">
+        <span class="coin">🪙</span>
+        <span id="creditBalance">0</span>
+      </div>
+      <button id="backBtn" class="nav-btn">← Back to Home</button>
+    </div>
+  </div>
+</header>
+
+<div id="uploadsContainer" class="uploads-container">
+  <div id="uploadsList" class="uploads-list">
+    <!-- Jobs will be loaded here -->
+  </div>
+</div>
+
+<script>
+const el = (id) => document.getElementById(id);
+
+async function loadUploads() {
+  try {
+    const response = await fetch('/api/jobs/all', { credentials: 'include' });
+    if (!response.ok) {
+      el('uploadsList').innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.7;">Failed to load uploads</div>';
+      return;
+    }
+    
+    const data = await response.json();
+    const jobs = data.jobs || [];
+    
+    if (jobs.length === 0) {
+      el('uploadsList').innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.7;">No uploads yet. Start by uploading a video!</div>';
+      return;
+    }
+    
+    const html = jobs.map(job => `
+      <div class="upload-card">
+        <div class="card-header">
+          <div>
+            <div class="job-title">Job #${job.id.substring(0, 8)}</div>
+            <div class="job-date">${new Date(job.created_at).toLocaleDateString()}</div>
+          </div>
+          <a href="/?job=${job.id}" class="card-link">Open →</a>
+        </div>
+        <div class="card-clips">
+          <strong>${job.clips?.length || 0} clips generated</strong>
+        </div>
+      </div>
+    `).join('');
+    
+    el('uploadsList').innerHTML = html;
+  } catch (err) {
+    console.error('Error loading uploads:', err);
+    el('uploadsList').innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.7;">Error loading uploads</div>';
+  }
+}
+
+el('backBtn')?.addEventListener('click', () => {
+  window.location.href = '/';
+});
+
+loadUploads();
+</script>
+
+<style>
+.uploads-container {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+.uploads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.upload-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upload-card:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 42, 42, 0.3);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.job-title {
+  font-weight: 600;
+  color: #fff;
+}
+
+.job-date {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+.card-link {
+  color: #ff2a2a;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+
+.card-link:hover {
+  color: #ff6b6b;
+}
+
+.card-clips {
+  font-size: 14px;
+  opacity: 0.8;
+}
+</style>
+
+</body>
+</html>

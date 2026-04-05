@@ -25,7 +25,19 @@
         <span class="coin">🪙</span>
         <span id="creditBalance">0</span>
       </div>
-      <button id="authBtn" class="nav-btn">Login / Create</button>
+      <div class="account-menu-container">
+        <button id="authBtn" class="nav-btn">Login / Create</button>
+        <div id="accountDropdown" class="account-dropdown" style="display:none;">
+          <div class="dropdown-header">
+            <span id="dropdownUser">User</span>
+            <span id="dropdownAdmin" class="admin-badge" style="display:none;">(ADMIN)</span>
+          </div>
+          <div class="dropdown-divider"></div>
+          <a href="/uploads" class="dropdown-item">📁 My Uploads</a>
+          <a href="/admin" class="dropdown-item" id="adminLink" style="display:none;">⚙️ Admin Panel</a>
+          <button id="logoutBtn" class="dropdown-item logout">🚪 Logout</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -54,10 +66,11 @@
         <select id="clipLen">
           <option value="10">10s</option>
           <option value="15">15s</option>
-          <option value="25" selected>25s</option>
           <option value="30">30s</option>
           <option value="45">45s</option>
-          <option value="60">60s</option>
+          <option value="60" selected>60s</option>
+          <option value="90">90s</option>
+          <option value="120">120s (2 min)</option>
         </select>
       </div>
       <div>
@@ -125,6 +138,13 @@
 
     <button id="go">Generate</button>
 
+    <div id="uploadProgress" class="upload-progress" style="display:none;">
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+      <div id="progressText" class="progress-text">Uploading... 0%</div>
+    </div>
+
     <div class="status" id="status">Idle.</div>
 
     <div class="clips" id="clips"></div>
@@ -152,6 +172,18 @@
           <input id="wordWindow" type="number" value="3" min="1" max="5" />
         </div>
       </div>
+
+      <label>Font family</label>
+      <select id="fontFamily">
+        <option value="Arial, sans-serif" selected>Arial</option>
+        <option value="Helvetica, sans-serif">Helvetica</option>
+        <option value="Verdana, sans-serif">Verdana</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="Times New Roman, serif">Times New Roman</option>
+        <option value="Courier New, monospace">Courier New</option>
+        <option value="Impact, sans-serif">Impact</option>
+        <option value="Comic Sans MS, cursive">Comic Sans</option>
+      </select>
 
       <label>Text color</label>
       <div class="palette" id="textPalette"></div>

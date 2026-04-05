@@ -321,6 +321,31 @@ def billing_page():
     # optional, only works if you create billing.html
     return serve_template_file("billing.html")
 
+
+@app.get("/editor", response_class=HTMLResponse)
+def caption_editor_page():
+    editor_path = TEMPLATES_DIR / "caption-editor.html"
+    if not editor_path.exists():
+        return HTMLResponse("<h1>Missing app/templates/caption-editor.html</h1>", status_code=500)
+    return HTMLResponse(editor_path.read_text(encoding="utf-8"))
+
+
+@app.get("/uploads", response_class=HTMLResponse)
+def uploads_page():
+    uploads_path = TEMPLATES_DIR / "uploads.html"
+    if not uploads_path.exists():
+        return HTMLResponse("<h1>Missing app/templates/uploads.html</h1>", status_code=500)
+    return HTMLResponse(uploads_path.read_text(encoding="utf-8"))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    admin_path = TEMPLATES_DIR / "admin.html"
+    if not admin_path.exists():
+        return HTMLResponse("<h1>Missing app/templates/admin.html</h1>", status_code=500)
+    return HTMLResponse(admin_path.read_text(encoding="utf-8"))
+
+
 # =========================================================
 # Billing plans endpoint (ONE ONLY)
 # =========================================================
@@ -493,6 +518,7 @@ def login(response: Response, username: str = Form(...), password: str = Form(..
         "plan": u2["plan"],
         "billing": u2["billing"],
         "next_reset_at": u2["next_reset_at"],
+        "is_admin": bool(u2["is_admin"]),
     }
 
 
@@ -506,6 +532,7 @@ def me(user=Depends(get_current_user)):
         "plan": user["plan"],
         "billing": user["billing"],
         "next_reset_at": user["next_reset_at"],
+        "is_admin": bool(user["is_admin"]),
     }
 
 
@@ -741,7 +768,7 @@ async def api_create_job(
     request: Request,
     user=Depends(get_current_user),
     video: UploadFile = File(...),
-    clip_len: int = Form(25),
+    clip_len: int = Form(60),
     max_clips: int = Form(8),
     out_aspect: str = Form("9:16"),
     out_w: int = Form(1080),
@@ -760,8 +787,8 @@ async def api_create_job(
     follow_min_switch_frames: int = Form(16),
     follow_max_move_px_per_sec: int = Form(320),
 ):
-    if clip_len < 5 or clip_len > 120:
-        raise HTTPException(status_code=400, detail="clip_len must be 5-120 seconds")
+    if clip_len < 10 or clip_len > 120:
+        raise HTTPException(status_code=400, detail="clip_len must be 10-120 seconds")
     if max_clips < 1 or max_clips > 50:
         raise HTTPException(status_code=400, detail="max_clips must be 1-50")
 
@@ -856,6 +883,31 @@ async def api_create_job(
     return {"job_id": job_id, "credits": new_credits}
 
 
+@app.get("/api/jobs/all")
+def api_all_user_jobs(user=Depends(get_current_user)):
+    """Get all jobs for the current user."""
+    jobs_root = user_jobs_root(user["id"])
+    if not jobs_root.exists():
+        return {"jobs": []}
+    
+    jobs = []
+    for job_dir in sorted(jobs_root.iterdir(), reverse=True):
+        if job_dir.is_dir():
+            job_json = job_dir / "job.json"
+            if job_json.exists():
+                try:
+                    job_data = json.loads(job_json.read_text(encoding="utf-8"))
+                    jobs.append({
+                        "id": job_dir.name,
+                        "clips": job_data.get("clips", []),
+                        "created_at": job_dir.stat().st_ctime
+                    })
+                except Exception:
+                    pass
+    
+    return {"jobs": jobs}
+
+
 @app.get("/api/jobs/{job_id}/clips")
 def api_list_clips(job_id: str, user=Depends(get_current_user)):
     from app.engine import list_clips  # noqa
@@ -942,3 +994,109 @@ def api_save_captions(
 
     srt.write_text(srt_text or "", encoding="utf-8")
     return {"ok": True}
+
+
+@app.post("/api/jobs/{job_id}/clips/{idx}/words")
+def api_save_words(
+    job_id: str,
+    idx: int,
+    words_json: str = Form(""),
+    user=Depends(get_current_user),
+):
+    from app.engine import get_clip_paths  # noqa
+    job_dir = user_jobs_root(user["id"]) / job_id
+    paths = get_clip_paths(job_dir, idx)
+    words_json_path = paths["words_json"]
+
+    if not (job_dir / f"clip_{idx}.mp4").exists():
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    try:
+        # Validate JSON
+        words_data = json.loads(words_json)
+        if not isinstance(words_data, dict) or "words" not in words_data:
+            raise ValueError("Invalid words JSON format")
+
+        # Save to file
+        words_json_path.write_text(json.dumps(words_data, indent=2), encoding="utf-8")
+        return {"ok": True}
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+
+
+# =========================================================
+# Admin API endpoints
+# =========================================================
+@app.post("/api/admin/make-admin")
+async def api_make_admin(
+    request: Request,
+    user=Depends(get_current_user),
+):
+    """Grant admin status to a user (admin only)."""
+    # Check if current user is admin
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        data = await request.json()
+        target_email = data.get("email", "").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    
+    if not target_email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        
+        # Check if user exists
+        cur.execute("SELECT id, is_admin FROM users WHERE email = ?", (target_email,))
+        result = cur.fetchone()
+        
+        if not result:
+            conn.close()
+            raise HTTPException(status_code=404, detail=f"User {target_email} not found")
+        
+        user_id, is_admin = result
+        if is_admin:
+            conn.close()
+            return {"detail": f"User {target_email} is already an admin"}
+        
+        # Make user admin
+        cur.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        
+        return {"detail": f"User {target_email} is now an admin"}
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/api/admin/users")
+def api_get_users(user=Depends(get_current_user)):
+    """Get all users (admin only)."""
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cur = conn.cursor()
+        cur.execute("SELECT id, email, is_admin, credits, clips_used_total FROM users ORDER BY id")
+        rows = cur.fetchall()
+        conn.close()
+        
+        users = [
+            {
+                "id": r[0],
+                "email": r[1],
+                "is_admin": bool(r[2]),
+                "credits": r[3] or 0,
+                "clips_used_total": r[4] or 0
+            }
+            for r in rows
+        ]
+        
+        return {"users": users}
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

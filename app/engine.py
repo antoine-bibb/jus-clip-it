@@ -509,11 +509,49 @@ def smart_follow_crop(
 
 
 # ----------------------------
+# Generate clip name from transcript
+# ----------------------------
+def generate_clip_name(transcript_text: str, max_length: int = 50) -> str:
+    """Generate a concise, descriptive name from clip transcript (max 50 chars)."""
+    if not transcript_text or not transcript_text.strip():
+        return "Untitled"
+    
+    # Take first significant phrase or key words
+    text = transcript_text.strip()
+    
+    # Remove common filler words and get important keywords
+    fillers = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'is', 'are', 'was', 'were', 'be', 'with'}
+    words = [w for w in text.split() if w.lower() not in fillers and len(w) > 2]
+    
+    if not words:
+        # If all words are fillers, just take first few words
+        words = text.split()[:3]
+    
+    # Build name from keywords (capitalize first word)
+    name = ' '.join(words[:5])  # Take up to 5 key words
+    if len(name) > max_length:
+        name = name[:max_length-3] + '...'
+    
+    return name or "Untitled"
+
+
+def get_clip_transcript(clip_path: str) -> str:
+    """Get full transcript text from a clip using Whisper."""
+    try:
+        model = whisper.load_model("base")
+        result = model.transcribe(clip_path, fp16=False)
+        text = result.get("text", "").strip()
+        return text
+    except Exception as e:
+        print(f"Warning: Could not transcribe {clip_path}: {e}")
+        return ""
+
+
 # Job creation
 # ----------------------------
 def create_job(
     job_dir: Path,
-    clip_len: int = 25,
+    clip_len: int = 60,
     max_clips: int = 8,
     out_aspect: str = "9:16",
     out_w: int = 1080,
@@ -608,8 +646,20 @@ def create_job(
         thumb = job_dir / f"thumb_{i}.jpg"
         make_thumbnail(str(out_mp4), str(thumb), at_seconds=min(0.5, clip_len / 2))
 
+        # Generate AI name from clip transcript
+        clip_name = "Clip " + str(i + 1)
+        try:
+            # Try to transcribe and generate name
+            clip_transcript = get_clip_transcript(str(out_mp4))
+            if clip_transcript:
+                clip_name = generate_clip_name(clip_transcript)
+        except Exception:
+            # If transcription fails, use default name
+            pass
+        
         clips.append({
             "index": i,
+            "name": clip_name,
             "start": float(s),
             "end": float(min(dur, s + clip_len)),
             "filename": out_mp4.name,
