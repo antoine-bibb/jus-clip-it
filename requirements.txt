@@ -4,3 +4,14 @@ python-dotenv
 stripe
 jinja2
 python-multipart
+sqlalchemy
+aiosqlite
+psycopg[binary]
+pydantic-settings
+celery
+redis
+openai
+email-validator
+numpy
+opencv-python-headless
+mediapipe
