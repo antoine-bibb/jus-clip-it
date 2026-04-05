@@ -125,6 +125,7 @@ export default function Dashboard() {
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="block w-full text-sm"
         />
+        {!file && <p className="text-sm text-zinc-500">Please select a video file to upload.</p>}
         <button
           type="submit"
           disabled={!file || uploading}
